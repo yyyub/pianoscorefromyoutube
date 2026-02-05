@@ -1,6 +1,7 @@
 const Vex = require('vexflow');
 const { createCanvas } = require('canvas');
 const puppeteer = require('puppeteer');
+const { Midi } = require('@tonejs/midi');
 const fs = require('fs-extra');
 const path = require('path');
 const fileManager = require('./file-manager');
@@ -12,15 +13,35 @@ class SheetGenerator {
 
   async parseMidiFile(midiPath) {
     try {
-      // Read MIDI file
       const midiBuffer = await fs.readFile(midiPath);
+      const midi = new Midi(midiBuffer);
 
-      // For now, we'll create a simple structure
-      // In a full implementation, we'd use a MIDI parsing library
+      const tempo = midi.header.tempos && midi.header.tempos.length > 0
+        ? midi.header.tempos[0].bpm
+        : 120;
+
+      const timeSigEntry = midi.header.timeSignatures && midi.header.timeSignatures.length > 0
+        ? midi.header.timeSignatures[0].timeSignature
+        : [4, 4];
+
+      const timeSignature = `${timeSigEntry[0]}/${timeSigEntry[1]}`;
+
+      const notes = [];
+      midi.tracks.forEach(track => {
+        track.notes.forEach(note => {
+          notes.push({
+            midi: note.midi,
+            time: note.time,
+            duration: note.duration,
+            velocity: note.velocity
+          });
+        });
+      });
+
       return {
-        notes: [],
-        timeSignature: '4/4',
-        tempo: 120,
+        notes,
+        timeSignature,
+        tempo,
         keySignature: 'C'
       };
     } catch (error) {
@@ -28,53 +49,285 @@ class SheetGenerator {
     }
   }
 
-  async generatePianoStaff(notes, metadata) {
-    // Create a canvas for rendering
-    const canvas = createCanvas(800, 1100); // Letter size
-    const context = canvas.getContext('2d');
+  quantize(value, step) {
+    return Math.max(step, Math.round(value / step) * step);
+  }
 
-    // White background
-    context.fillStyle = 'white';
-    context.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Initialize VexFlow renderer
-    const renderer = new Vex.Flow.Renderer(canvas, Vex.Flow.Renderer.Backends.CANVAS);
-    renderer.resize(800, 1100);
-    const context2d = renderer.getContext();
-
-    // Create a stave (staff)
-    const stave = new Vex.Flow.Stave(10, 40, 780);
-
-    // Add clef, time signature, and key signature
-    stave.addClef('treble');
-    stave.addTimeSignature(metadata.timeSignature || '4/4');
-
-    // Draw the stave
-    stave.setContext(context2d).draw();
-
-    // For demonstration, we'll add some sample notes
-    // In a full implementation, this would use the parsed MIDI data
-    const voice = new Vex.Flow.Voice({
-      num_beats: 4,
-      beat_value: 4
-    });
-
-    // Add some example notes
-    const notes_vex = [
-      new Vex.Flow.StaveNote({ keys: ['c/4'], duration: 'q' }),
-      new Vex.Flow.StaveNote({ keys: ['d/4'], duration: 'q' }),
-      new Vex.Flow.StaveNote({ keys: ['e/4'], duration: 'q' }),
-      new Vex.Flow.StaveNote({ keys: ['f/4'], duration: 'q' })
+  beatsToDuration(beats) {
+    const options = [
+      { beats: 4, dur: 'w' },
+      { beats: 2, dur: 'h' },
+      { beats: 1, dur: 'q' },
+      { beats: 0.5, dur: '8' },
+      { beats: 0.25, dur: '16' }
     ];
 
-    voice.addTickables(notes_vex);
+    let best = options[options.length - 1];
+    let minDiff = Infinity;
+    for (const option of options) {
+      const diff = Math.abs(beats - option.beats);
+      if (diff < minDiff) {
+        minDiff = diff;
+        best = option;
+      }
+    }
 
-    // Format and justify the notes
-    const formatter = new Vex.Flow.Formatter();
-    formatter.joinVoices([voice]).format([voice], 700);
+    return best;
+  }
 
-    // Render voice
-    voice.draw(context2d, stave);
+  splitBeats(beats) {
+    const segments = [];
+    const options = [4, 2, 1, 0.5, 0.25];
+    let remaining = beats;
+
+    for (const option of options) {
+      while (remaining >= option - 1e-6) {
+        segments.push(option);
+        remaining -= option;
+      }
+    }
+
+    if (remaining > 1e-3) {
+      segments.push(0.25);
+    }
+
+    return segments;
+  }
+
+  midiToKey(midi) {
+    const names = ['c', 'c#', 'd', 'd#', 'e', 'f', 'f#', 'g', 'g#', 'a', 'a#', 'b'];
+    const name = names[midi % 12];
+    const octave = Math.floor(midi / 12) - 1;
+    return `${name}/${octave}`;
+  }
+
+  addAccidentals(staveNote, keys) {
+    // VexFlow v5 in node-canvas may not expose addAccidental on StaveNote.
+    // Skip accidentals to avoid runtime errors.
+    return;
+  }
+
+  buildMeasures(notes, tempo, timeSignature) {
+    const [numerator, denominator] = timeSignature.split('/').map(Number);
+    const beatsPerMeasure = Number.isFinite(numerator) ? numerator : 4;
+    const beatValue = Number.isFinite(denominator) ? denominator : 4;
+    const beatDuration = 60 / tempo;
+    const quantizeStep = 0.25;
+
+    const trebleMap = new Map();
+    const bassMap = new Map();
+
+    const addToMap = (map, note) => {
+      const startBeat = this.quantize(note.time / beatDuration, quantizeStep);
+      let durationBeats = this.quantize(note.duration / beatDuration, quantizeStep);
+      durationBeats = Math.max(quantizeStep, durationBeats);
+
+      const measureIndex = Math.floor(startBeat / beatsPerMeasure);
+      const startInMeasure = startBeat - measureIndex * beatsPerMeasure;
+      const key = `${startInMeasure.toFixed(3)}:${durationBeats.toFixed(3)}`;
+
+      if (!map.has(measureIndex)) {
+        map.set(measureIndex, new Map());
+      }
+
+      const measureMap = map.get(measureIndex);
+      if (!measureMap.has(key)) {
+        measureMap.set(key, {
+          startBeat: startInMeasure,
+          durationBeats,
+          notes: []
+        });
+      }
+
+      measureMap.get(key).notes.push(note.midi);
+    };
+
+    notes.forEach(note => {
+      if (note.midi >= 60) {
+        addToMap(trebleMap, note);
+      } else {
+        addToMap(bassMap, note);
+      }
+    });
+
+    const maxMeasure = Math.max(
+      trebleMap.size ? Math.max(...trebleMap.keys()) : 0,
+      bassMap.size ? Math.max(...bassMap.keys()) : 0
+    );
+
+    const buildArray = (map) => {
+      const measures = [];
+      for (let i = 0; i <= maxMeasure; i++) {
+        const measureMap = map.get(i);
+        const events = measureMap ? Array.from(measureMap.values()) : [];
+        events.sort((a, b) => a.startBeat - b.startBeat);
+        measures.push(events);
+      }
+      return measures;
+    };
+
+    return {
+      measuresTreble: buildArray(trebleMap),
+      measuresBass: buildArray(bassMap),
+      beatsPerMeasure,
+      beatValue
+    };
+  }
+
+  buildTickables(events, beatsPerMeasure, restKey) {
+    const tickables = [];
+    let cursor = 0;
+
+    const addRest = (beats) => {
+      let remaining = beats;
+      while (remaining > 1e-3) {
+        const segment = Math.min(remaining, 4);
+        const dur = this.beatsToDuration(segment).dur + 'r';
+        tickables.push(new Vex.StaveNote({
+          keys: [restKey],
+          duration: dur
+        }));
+        remaining -= segment;
+      }
+    };
+
+    events.forEach(event => {
+      if (event.startBeat > cursor) {
+        addRest(event.startBeat - cursor);
+        cursor = event.startBeat;
+      }
+
+      let remaining = Math.min(event.durationBeats, beatsPerMeasure - cursor);
+      if (remaining <= 0) {
+        return;
+      }
+
+      const keys = event.notes
+        .sort((a, b) => a - b)
+        .map(midi => this.midiToKey(midi));
+
+      while (remaining > 1e-3 && cursor < beatsPerMeasure - 1e-6) {
+        const segment = Math.min(remaining, beatsPerMeasure - cursor);
+        const { dur } = this.beatsToDuration(segment);
+
+        const staveNote = new Vex.StaveNote({
+          keys,
+          duration: dur
+        });
+
+        this.addAccidentals(staveNote, keys);
+        tickables.push(staveNote);
+
+        cursor += segment;
+        remaining -= segment;
+      }
+    });
+
+    if (cursor < beatsPerMeasure) {
+      addRest(beatsPerMeasure - cursor);
+    }
+
+    if (tickables.length === 0) {
+      tickables.push(new Vex.StaveNote({ keys: [restKey], duration: 'wr' }));
+    }
+
+    return tickables;
+  }
+
+  async generatePianoStaff(notes, metadata) {
+    const canvas = createCanvas(800, 1100);
+    const rawContext = canvas.getContext('2d');
+    const context2d = new Vex.CanvasContext(rawContext);
+
+    rawContext.fillStyle = 'white';
+    rawContext.fillRect(0, 0, canvas.width, canvas.height);
+
+    const timeSignature = metadata.timeSignature || '4/4';
+    const tempo = metadata.tempo || 120;
+
+    const {
+      measuresTreble,
+      measuresBass,
+      beatsPerMeasure,
+      beatValue
+    } = this.buildMeasures(notes, tempo, timeSignature);
+
+    const totalMeasures = Math.max(measuresTreble.length, measuresBass.length);
+    if (totalMeasures === 0) {
+      return canvas;
+    }
+
+    const margin = 20;
+    const measuresPerLine = 4;
+    const measureWidth = (canvas.width - margin * 2) / measuresPerLine;
+    const lineHeight = 160;
+
+    let currentMeasure = 0;
+    let line = 0;
+
+    while (currentMeasure < totalMeasures && margin + line * lineHeight + 120 < canvas.height) {
+      const y = margin + line * lineHeight;
+
+      for (let i = 0; i < measuresPerLine && currentMeasure < totalMeasures; i++) {
+        const x = margin + i * measureWidth;
+
+        const trebleStave = new Vex.Stave(x, y, measureWidth);
+        const bassStave = new Vex.Stave(x, y + 70, measureWidth);
+
+        if (currentMeasure === 0 && i === 0) {
+          trebleStave.addClef('treble');
+          trebleStave.addTimeSignature(timeSignature);
+          bassStave.addClef('bass');
+          bassStave.addTimeSignature(timeSignature);
+        }
+
+        trebleStave.setContext(context2d).draw();
+        bassStave.setContext(context2d).draw();
+
+        if (i === 0) {
+          new Vex.StaveConnector(trebleStave, bassStave)
+            .setType(Vex.StaveConnector.type.BRACE)
+            .setContext(context2d)
+            .draw();
+          new Vex.StaveConnector(trebleStave, bassStave)
+            .setType(Vex.StaveConnector.type.SINGLE_LEFT)
+            .setContext(context2d)
+            .draw();
+        }
+
+        new Vex.StaveConnector(trebleStave, bassStave)
+          .setType(Vex.StaveConnector.type.SINGLE_RIGHT)
+          .setContext(context2d)
+          .draw();
+
+        const trebleEvents = measuresTreble[currentMeasure] || [];
+        const bassEvents = measuresBass[currentMeasure] || [];
+
+        const trebleTickables = this.buildTickables(trebleEvents, beatsPerMeasure, 'b/4');
+        const bassTickables = this.buildTickables(bassEvents, beatsPerMeasure, 'd/3');
+
+        const trebleVoice = new Vex.Voice({
+          num_beats: beatsPerMeasure,
+          beat_value: beatValue
+        }).setStrict(false).addTickables(trebleTickables);
+
+        const bassVoice = new Vex.Voice({
+          num_beats: beatsPerMeasure,
+          beat_value: beatValue
+        }).setStrict(false).addTickables(bassTickables);
+
+        const formatter = new Vex.Formatter();
+        formatter.joinVoices([trebleVoice]).format([trebleVoice], measureWidth - 10);
+        formatter.joinVoices([bassVoice]).format([bassVoice], measureWidth - 10);
+
+        trebleVoice.draw(context2d, trebleStave);
+        bassVoice.draw(context2d, bassStave);
+
+        currentMeasure += 1;
+      }
+
+      line += 1;
+    }
 
     return canvas;
   }

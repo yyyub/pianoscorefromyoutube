@@ -1,144 +1,71 @@
-const { BasicPitch, addPitchBendsToNoteEvents, outputToNotesPoly } = require('@spotify/basic-pitch');
-const fs = require('fs-extra');
 const path = require('path');
-const fileManager = require('./file-manager');
+const { Worker } = require('worker_threads');
 
 class Transcriber {
   constructor() {
-    this.model = null;
-    this.modelInitialized = false;
     this.isCancelled = false;
-  }
-
-  async initializeModel() {
-    if (this.modelInitialized && this.model) {
-      return;
-    }
-
-    try {
-      console.log('Initializing Basic Pitch model...');
-      this.model = new BasicPitch();
-      this.modelInitialized = true;
-      console.log('Basic Pitch model initialized');
-    } catch (error) {
-      console.error('Failed to initialize Basic Pitch:', error);
-      throw new Error('Failed to initialize AI transcription model: ' + error.message);
-    }
+    this.worker = null;
   }
 
   async transcribeToMidi(audioPath, progressCallback) {
-    if (!this.modelInitialized) {
-      await this.initializeModel();
-    }
-
     this.isCancelled = false;
-
-    const outputFilename = fileManager.generateUniqueFilename('.mid');
-    const outputPath = fileManager.getTempPath(outputFilename);
-
-    try {
-      if (progressCallback) {
-        progressCallback(10, 'Loading audio file...');
-      }
-
-      // Check if file exists
-      const fileExists = await fileManager.fileExists(audioPath);
-      if (!fileExists) {
-        throw new Error('Audio file not found');
-      }
-
-      if (this.isCancelled) {
-        throw new Error('Transcription cancelled');
-      }
-
-      if (progressCallback) {
-        progressCallback(30, 'Analyzing audio with AI...');
-      }
-
-      // Note: Full Basic Pitch integration in Node.js requires audio preprocessing
-      // For now, create a simple MIDI file with demo notes
-      // TODO: Implement full audio-to-MIDI transcription using Basic Pitch or alternative library
-
-      if (progressCallback) {
-        progressCallback(50, 'Transcribing to MIDI...');
-      }
-
-      // Create a simple MIDI file (demo/placeholder)
-      const midiData = this.createDemoMidi();
-
-      if (this.isCancelled) {
-        throw new Error('Transcription cancelled');
-      }
-
-      if (progressCallback) {
-        progressCallback(80, 'Processing MIDI data...');
-      }
-
-      // Save MIDI file
-      await fs.writeFile(outputPath, Buffer.from(midiData));
-
-      if (progressCallback) {
-        progressCallback(100, 'Transcription complete');
-      }
-
-      console.log('Note: Currently using demo MIDI. Full AI transcription requires additional setup.');
-
-      return {
-        filePath: outputPath,
-        filename: outputFilename
-      };
-    } catch (error) {
-      await fileManager.deleteFile(outputPath);
-
-      if (error.message.includes('cancelled')) {
-        throw error;
-      }
-
-      console.error('Transcription error:', error);
-      throw new Error(`Transcription failed: ${error.message}`);
+    if (this.worker) {
+      throw new Error('Transcription already in progress');
     }
-  }
 
-  createDemoMidi() {
-    // Create a minimal valid MIDI file with C major scale
-    // MIDI file format: Header + Track
-    const header = [
-      0x4D, 0x54, 0x68, 0x64, // "MThd"
-      0x00, 0x00, 0x00, 0x06, // Header length
-      0x00, 0x00,             // Format 0
-      0x00, 0x01,             // 1 track
-      0x00, 0x60              // 96 ticks per quarter note
-    ];
+    return new Promise((resolve, reject) => {
+      const workerPath = path.join(__dirname, 'transcribe-worker.js');
+      const worker = new Worker(workerPath, { workerData: { audioPath } });
+      this.worker = worker;
 
-    // Simple track with C major scale
-    const track = [
-      0x4D, 0x54, 0x72, 0x6B, // "MTrk"
-      0x00, 0x00, 0x00, 0x3B, // Track length (59 bytes)
-      // Time signature: 4/4
-      0x00, 0xFF, 0x58, 0x04, 0x04, 0x02, 0x18, 0x08,
-      // Tempo: 120 BPM
-      0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20,
-      // Note On: C4 (middle C)
-      0x00, 0x90, 0x3C, 0x64,
-      // Note Off: C4 (after 96 ticks = 1 quarter note)
-      0x60, 0x80, 0x3C, 0x64,
-      // Note On: D4
-      0x00, 0x90, 0x3E, 0x64,
-      0x60, 0x80, 0x3E, 0x64,
-      // Note On: E4
-      0x00, 0x90, 0x40, 0x64,
-      0x60, 0x80, 0x40, 0x64,
-      // Note On: F4
-      0x00, 0x90, 0x41, 0x64,
-      0x60, 0x80, 0x41, 0x64,
-      // Note On: G4
-      0x00, 0x90, 0x43, 0x64,
-      0x60, 0x80, 0x43, 0x64,
-      // End of track
-      0x00, 0xFF, 0x2F, 0x00
-    ];
+      let lastProgressAt = 0;
+      const reportProgress = (percent, message) => {
+        const now = Date.now();
+        if (percent === 100 || now - lastProgressAt > 250) {
+          lastProgressAt = now;
+          if (progressCallback) {
+            progressCallback(percent, message);
+          }
+        }
+      };
 
-    return new Uint8Array([...header, ...track]);
+      const cleanup = () => {
+        this.worker = null;
+      };
+
+      worker.on('message', (message) => {
+        if (!message || typeof message !== 'object') return;
+        if (message.type === 'progress') {
+          reportProgress(message.percent, message.message);
+          return;
+        }
+        if (message.type === 'result') {
+          cleanup();
+          resolve(message.payload);
+          return;
+        }
+        if (message.type === 'error') {
+          cleanup();
+          reject(new Error(`Transcription failed: ${message.message}`));
+        }
+      });
+
+      worker.on('error', (error) => {
+        cleanup();
+        reject(new Error(`Transcription failed: ${error.message}`));
+      });
+
+      worker.on('exit', (code) => {
+        if (this.isCancelled) {
+          cleanup();
+          return;
+        }
+        if (code !== 0) {
+          cleanup();
+          reject(new Error(`Transcription failed: worker exited with code ${code}`));
+        }
+      });
+    });
   }
 
   async processMidiForPiano(midiData) {
@@ -167,6 +94,11 @@ class Transcriber {
 
   cancel() {
     this.isCancelled = true;
+    if (this.worker) {
+      this.worker.postMessage({ type: 'cancel' });
+      this.worker.terminate();
+      this.worker = null;
+    }
   }
 }
 

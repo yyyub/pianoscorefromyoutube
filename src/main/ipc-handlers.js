@@ -4,7 +4,6 @@ const fileManager = require('./file-manager');
 const youtubeDownloader = require('./youtube-downloader');
 const audioConverter = require('./audio-converter');
 const transcriber = require('./transcriber');
-const sheetGenerator = require('./sheet-generator');
 
 class IPCHandlers {
   constructor() {
@@ -123,23 +122,17 @@ class IPCHandlers {
       // Delete audio file after transcription
       await fileManager.deleteFile(audioResult.filePath);
 
-      // Step 4: Generate sheet music (100% of progress)
+      // Step 4: Export MIDI to output (100% of progress)
       this.currentStep = 4;
-      this.sendProgress(4, 0, 'Generating sheet music...');
+      this.sendProgress(4, 0, 'Saving MIDI file...');
 
-      const pdfResult = await sheetGenerator.generateSheetMusic(
-        midiResult.filePath,
-        videoTitle,
-        (percent, message) => {
-          this.sendProgress(4, percent, message);
-        }
-      );
+      const midiFilename = fileManager.sanitizeFilename(`${videoTitle || 'transcription'}.mid`);
+      const finalMidiPath = await fileManager.moveToOutput(midiResult.filePath, midiFilename);
 
-      // Delete MIDI file after PDF generation
-      await fileManager.deleteFile(midiResult.filePath);
+      this.sendProgress(4, 100, 'MIDI saved');
 
       // Send completion event
-      this.sendComplete(pdfResult.filePath, pdfResult.filename);
+      this.sendComplete(finalMidiPath, midiFilename);
 
       // Final cleanup
       await this.cleanup();
