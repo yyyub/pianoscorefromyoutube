@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube to Piano Sheet Music</title>
+  <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🎹 YouTube to Piano Sheet Music</h1>
+      <p class="subtitle">AI로 YouTube 영상을 피아노 악보로 변환</p>
+    </header>
+
+    <main>
+      <div class="input-section">
+        <div class="input-group">
+          <label for="youtube-url">YouTube URL</label>
+          <input
+            type="text"
+            id="youtube-url"
+            placeholder="https://www.youtube.com/watch?v=..."
+            autocomplete="off"
+          >
+          <span class="error-message" id="url-error"></span>
+        </div>
+
+        <div class="button-group">
+          <button id="start-btn" class="btn btn-primary">
+            변환 시작
+          </button>
+          <button id="cancel-btn" class="btn btn-secondary" disabled>
+            취소
+          </button>
+        </div>
+      </div>
+
+      <div class="progress-section" id="progress-section">
+        <div class="progress-steps">
+          <div class="progress-step" data-step="1">
+            <div class="step-icon">1</div>
+            <div class="step-label">다운로드</div>
+            <div class="step-status">대기 중</div>
+          </div>
+          <div class="progress-step" data-step="2">
+            <div class="step-icon">2</div>
+            <div class="step-label">변환</div>
+            <div class="step-status">대기 중</div>
+          </div>
+          <div class="progress-step" data-step="3">
+            <div class="step-icon">3</div>
+            <div class="step-label">전사</div>
+            <div class="step-status">대기 중</div>
+          </div>
+          <div class="progress-step" data-step="4">
+            <div class="step-icon">4</div>
+            <div class="step-label">악보 생성</div>
+            <div class="step-status">대기 중</div>
+          </div>
+        </div>
+
+        <div class="progress-bar-container">
+          <div class="progress-bar" id="progress-bar"></div>
+        </div>
+        <div class="progress-text" id="progress-text">준비 완료</div>
+      </div>
+
+      <div class="log-section">
+        <div class="log-header">
+          <h3>처리 로그</h3>
+          <button id="clear-log-btn" class="btn-icon">지우기</button>
+        </div>
+        <div class="log-container" id="log-container">
+          <div class="log-message log-info">
+            YouTube URL을 입력하고 '변환 시작' 버튼을 클릭하세요.
+          </div>
+        </div>
+      </div>
+
+      <div class="result-section" id="result-section">
+        <div class="result-card">
+          <h3>✅ 변환 완료!</h3>
+          <p id="result-message">피아노 악보가 생성되었습니다.</p>
+          <button id="open-pdf-btn" class="btn btn-primary">PDF 열기</button>
+          <button id="open-folder-btn" class="btn btn-secondary">폴더 열기</button>
+        </div>
+      </div>
+    </main>
+
+    <footer>
+      <p>
+        FFmpeg 설치 필요 |
+        <a href="#" id="help-link">도움말</a> |
+        <a href="#" id="about-link">정보</a>
+      </p>
+    </footer>
+  </div>
+
+  <script src="scripts/app.js"></script>
+  <script src="scripts/ui-controller.js"></script>
+  <script src="scripts/progress-handler.js"></script>
+</body>
+</html>

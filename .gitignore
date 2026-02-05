@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Electron build output
+dist/
+build/
+out/
+
+# Temporary files
+temp/*
+!temp/.gitkeep
+
+# Output files
+output/*
+!output/.gitkeep
+
+# Logs
+*.log
+npm-debug.log*
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+.env.local
+
+# yt-dlp binary
+yt-dlp*
+youtube-dl*

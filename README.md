@@ -1,0 +1,135 @@
+# YouTube to Piano Sheet Music
+
+Convert YouTube videos to Piano Sheet Music using AI transcription.
+
+## Features
+
+- Download YouTube videos
+- Convert audio to MP3
+- AI-powered music transcription using Spotify's Basic Pitch
+- Generate professional piano sheet music in PDF format
+- Real-time progress tracking
+- Clean and intuitive user interface
+
+## Prerequisites
+
+### Required Software
+
+1. **Node.js** (version 16 or higher)
+   - Download from: https://nodejs.org/
+
+2. **FFmpeg** (REQUIRED for audio conversion)
+   - **Windows**: Download from https://ffmpeg.org/download.html
+     - Extract the downloaded archive
+     - Add the `bin` folder to your system PATH
+   - **macOS**: `brew install ffmpeg`
+   - **Linux**: `sudo apt-get install ffmpeg`
+
+To verify FFmpeg is installed correctly, run:
+```bash
+ffmpeg -version
+```
+
+## Installation
+
+1. Clone or download this repository
+
+2. Install dependencies:
+```bash
+npm install
+```
+
+3. Start the application:
+```bash
+npm start
+```
+
+## Usage
+
+1. Launch the application
+2. Paste a YouTube URL into the input field
+3. Click "변환 시작" (Start Conversion)
+4. Wait for the 4-step process to complete:
+   - Step 1: Download video from YouTube
+   - Step 2: Convert video to MP3 audio
+   - Step 3: AI transcription to MIDI
+   - Step 4: Generate PDF sheet music
+5. Open the generated PDF from the results panel
+
+## Output
+
+Generated PDF files are saved in the `output` directory.
+
+## Technical Details
+
+### Technology Stack
+
+- **Electron**: Desktop application framework
+- **yt-dlp-wrap**: YouTube video downloader
+- **FFmpeg**: Audio/video conversion
+- **Basic Pitch** (Spotify): AI music transcription
+- **VexFlow**: Music notation rendering
+- **Puppeteer**: PDF generation
+
+### Processing Pipeline
+
+```
+YouTube URL → Video Download → MP3 Conversion → AI Transcription → Sheet Music PDF
+```
+
+### File Management
+
+- Temporary files are stored in the `temp` directory
+- All temp files are automatically cleaned up after processing
+- Final PDFs are saved in the `output` directory
+
+## Known Limitations
+
+- Transcription accuracy varies based on audio quality and music complexity
+- Best results with clear piano audio
+- Processing time: 2-5 minutes for a 3-minute video
+- Requires active internet connection for downloads
+
+## Troubleshooting
+
+### "FFmpeg is not installed" error
+- Make sure FFmpeg is installed and added to your system PATH
+- Restart the application after installing FFmpeg
+
+### Download fails
+- Check your internet connection
+- Verify the YouTube URL is valid
+- Some videos may be restricted or unavailable
+
+### Poor transcription quality
+- Best results with clear, single-instrument piano recordings
+- Complex orchestral or multi-instrument music may not transcribe well
+- Background noise can affect accuracy
+
+## Development
+
+Run in development mode with DevTools:
+```bash
+npm start
+```
+
+## Building for Production
+
+To create installers:
+```bash
+npm run build
+```
+
+## License
+
+MIT
+
+## Credits
+
+- Spotify Basic Pitch for AI transcription
+- VexFlow for music notation
+- yt-dlp for YouTube downloading
+
+---
+
+Made with ❤️ for musicians
