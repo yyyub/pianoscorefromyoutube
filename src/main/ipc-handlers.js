@@ -1,9 +1,11 @@
 const { ipcMain, shell } = require('electron');
 const path = require('path');
+const fs = require('fs-extra');
 const fileManager = require('./file-manager');
 const youtubeDownloader = require('./youtube-downloader');
 const audioConverter = require('./audio-converter');
 const transcriber = require('./transcriber');
+const stemSeparator = require('./stem-separator');
 
 class IPCHandlers {
   constructor() {
@@ -20,7 +22,7 @@ class IPCHandlers {
 
   setupHandlers() {
     // Main processing handler
-    ipcMain.handle('start-processing', async (event, url) => {
+    ipcMain.handle('start-processing', async (event, payload) => {
       if (this.isProcessing) {
         throw new Error('Processing already in progress');
       }
@@ -29,7 +31,7 @@ class IPCHandlers {
       this.tempFiles = [];
 
       try {
-        await this.processVideo(url);
+        await this.processVideo(payload);
       } catch (error) {
         this.isProcessing = false;
         this.sendError(error.message);
@@ -71,8 +73,11 @@ class IPCHandlers {
     });
   }
 
-  async processVideo(url) {
+  async processVideo(payload) {
     try {
+      const url = typeof payload === 'string' ? payload : payload.url;
+      const options = typeof payload === 'string' ? {} : (payload.options || {});
+
       // Initialize file manager
       await fileManager.initialize();
 
@@ -110,11 +115,30 @@ class IPCHandlers {
       this.currentStep = 3;
       this.sendProgress(3, 0, 'Starting AI transcription...');
 
+      let transcribeInputPath = audioResult.filePath;
+      let separationCleanupDir = null;
+
+      if (options.useSeparation) {
+        this.sendProgress(3, 0, 'Separating vocals (2 stems)...');
+        const separationResult = await stemSeparator.separateToAccompaniment(
+          audioResult.filePath,
+          (percent, message) => {
+            this.sendProgress(3, Math.min(20, Math.round(percent * 0.2)), message);
+          }
+        );
+        transcribeInputPath = separationResult.filePath;
+        separationCleanupDir = separationResult.cleanupDir;
+      }
+
       const midiResult = await transcriber.transcribeToMidi(
-        audioResult.filePath,
+        transcribeInputPath,
         (percent, message) => {
-          this.sendProgress(3, percent, message);
-        }
+          const scaled = options.useSeparation
+            ? Math.min(100, 20 + Math.round(percent * 0.8))
+            : percent;
+          this.sendProgress(3, scaled, message);
+        },
+        options
       );
 
       this.tempFiles.push(midiResult.filePath);
@@ -133,6 +157,10 @@ class IPCHandlers {
 
       // Send completion event
       this.sendComplete(finalMidiPath, midiFilename);
+
+      if (separationCleanupDir) {
+        await fs.remove(separationCleanupDir);
+      }
 
       // Final cleanup
       await this.cleanup();

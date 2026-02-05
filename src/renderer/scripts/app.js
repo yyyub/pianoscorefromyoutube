@@ -15,6 +15,8 @@ function initializeEventListeners() {
   const clearLogBtn = document.getElementById('clear-log-btn');
   const openPdfBtn = document.getElementById('open-pdf-btn');
   const openFolderBtn = document.getElementById('open-folder-btn');
+  const useSeparationToggle = document.getElementById('use-separation');
+  const qualityModeSelect = document.getElementById('quality-mode');
 
   // Start processing
   startBtn.addEventListener('click', async () => {
@@ -26,7 +28,10 @@ function initializeEventListeners() {
     }
 
     clearUrlError();
-    await startProcessing(url);
+    await startProcessing(url, {
+      useSeparation: useSeparationToggle ? useSeparationToggle.checked : false,
+      qualityMode: qualityModeSelect ? qualityModeSelect.value : 'normal'
+    });
   });
 
   // Cancel processing
@@ -96,7 +101,7 @@ function setupIPCListeners() {
   });
 }
 
-async function startProcessing(url) {
+async function startProcessing(url, options) {
   if (isProcessing) return;
 
   isProcessing = true;
@@ -104,7 +109,7 @@ async function startProcessing(url) {
   addLog(`처리 시작: ${url}`, 'info');
 
   try {
-    await window.electronAPI.startProcessing(url);
+    await window.electronAPI.startProcessing({ url, options });
   } catch (error) {
     addLog(`오류 발생: ${error.message}`, 'error');
     resetUI();

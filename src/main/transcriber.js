@@ -7,7 +7,7 @@ class Transcriber {
     this.worker = null;
   }
 
-  async transcribeToMidi(audioPath, progressCallback) {
+  async transcribeToMidi(audioPath, progressCallback, options = {}) {
     this.isCancelled = false;
     if (this.worker) {
       throw new Error('Transcription already in progress');
@@ -15,7 +15,7 @@ class Transcriber {
 
     return new Promise((resolve, reject) => {
       const workerPath = path.join(__dirname, 'transcribe-worker.js');
-      const worker = new Worker(workerPath, { workerData: { audioPath } });
+      const worker = new Worker(workerPath, { workerData: { audioPath, options } });
       this.worker = worker;
 
       let lastProgressAt = 0;

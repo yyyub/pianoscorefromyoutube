@@ -12,7 +12,8 @@
       "Bash(echo:*)",
       "Bash(ffmpeg:*)",
       "Bash(/c/ffmpeg/bin/ffmpeg.exe:*)",
-      "Bash(node test-basic-pitch.js:*)"
+      "Bash(node test-basic-pitch.js:*)",
+      "Bash(uv:*)"
     ]
   }
 }

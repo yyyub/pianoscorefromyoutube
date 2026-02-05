@@ -1,0 +1,9 @@
+README.md
+pyproject.toml
+src/main/demucs_runner.py
+src/main/spleeter_runner.py
+src/music.egg-info/PKG-INFO
+src/music.egg-info/SOURCES.txt
+src/music.egg-info/dependency_links.txt
+src/music.egg-info/requires.txt
+src/music.egg-info/top_level.txt

@@ -142,12 +142,54 @@ async function decodeAudioToFloat32(audioPath) {
   });
 }
 
+function applyQualityFilters(notes, mode) {
+  if (!notes || notes.length === 0) return notes;
+
+  if (mode === 'high') {
+    const minDuration = 0.08;
+    const minVelocity = 0.15;
+    const maxPolyphony = 8;
+
+    const filtered = notes.filter(note => (
+      note.durationSeconds >= minDuration && note.amplitude >= minVelocity
+    ));
+
+    filtered.sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
+
+    const grouped = [];
+    let group = [];
+    let lastTime = null;
+    const eps = 0.02;
+
+    filtered.forEach(note => {
+      if (lastTime === null || Math.abs(note.startTimeSeconds - lastTime) <= eps) {
+        group.push(note);
+      } else {
+        grouped.push(group);
+        group = [note];
+      }
+      lastTime = note.startTimeSeconds;
+    });
+    if (group.length) grouped.push(group);
+
+    const reduced = grouped.flatMap(g => g
+      .sort((a, b) => b.amplitude - a.amplitude)
+      .slice(0, maxPolyphony)
+    );
+
+    return reduced;
+  }
+
+  return notes;
+}
+
 async function run() {
   try {
     await fileManager.initialize();
 
     sendProgress(10, 'Loading audio file...');
     const audioPath = workerData.audioPath;
+    const options = workerData.options || {};
     const outputFilename = fileManager.generateUniqueFilename('.mid');
     const outputPath = fileManager.getTempPath(outputFilename);
 
@@ -188,11 +230,16 @@ async function run() {
 
     sendProgress(85, 'Generating MIDI...');
 
-    const rawNotes = outputToNotesPoly(frames, onsets, 0.25, 0.25, 5);
+    const onsetThresh = options.qualityMode === 'high' ? 0.35 : 0.25;
+    const frameThresh = options.qualityMode === 'high' ? 0.35 : 0.25;
+    const minNoteLen = options.qualityMode === 'high' ? 8 : 5;
+
+    const rawNotes = outputToNotesPoly(frames, onsets, onsetThresh, frameThresh, minNoteLen);
     const notesWithBends = addPitchBendsToNoteEvents(contours, rawNotes);
     const timedNotes = noteFramesToTime(notesWithBends);
     const pianoNotes = timedNotes.filter(note => note.pitchMidi >= 21 && note.pitchMidi <= 108);
-    const midiData = generateFileData(pianoNotes);
+    const finalNotes = applyQualityFilters(pianoNotes, options.qualityMode);
+    const midiData = generateFileData(finalNotes);
 
     await fs.writeFile(outputPath, Buffer.from(midiData));
     sendProgress(100, 'Transcription complete');
