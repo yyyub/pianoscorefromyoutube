@@ -30,7 +30,8 @@ async function initializeApp() {
   // Ensure required directories exist
   const dirs = [
     path.join(__dirname, 'temp'),
-    path.join(__dirname, 'output')
+    path.join(__dirname, 'output'),
+    path.join(__dirname, 'cache')
   ];
 
   for (const dir of dirs) {
@@ -40,6 +41,11 @@ async function initializeApp() {
   // Clean up any leftover temp files from previous sessions
   const tempDir = path.join(__dirname, 'temp');
   await fs.emptyDir(tempDir);
+
+  // Initialize cache and clean old entries (older than 7 days)
+  const cacheManager = require('./src/main/cache-manager');
+  await cacheManager.initialize();
+  await cacheManager.clearOldCache(7 * 24 * 60 * 60 * 1000);
 }
 
 app.whenReady().then(async () => {

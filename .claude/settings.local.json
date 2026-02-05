@@ -13,7 +13,9 @@
       "Bash(ffmpeg:*)",
       "Bash(/c/ffmpeg/bin/ffmpeg.exe:*)",
       "Bash(node test-basic-pitch.js:*)",
-      "Bash(uv:*)"
+      "Bash(uv:*)",
+      "Bash(node setup-gpu.js:*)",
+      "Bash(.venv/Scripts/python.exe:*)"
     ]
   }
 }

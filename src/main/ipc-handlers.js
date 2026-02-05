@@ -6,6 +6,7 @@ const youtubeDownloader = require('./youtube-downloader');
 const audioConverter = require('./audio-converter');
 const transcriber = require('./transcriber');
 const stemSeparator = require('./stem-separator');
+const cacheManager = require('./cache-manager');
 
 class IPCHandlers {
   constructor() {
@@ -78,50 +79,81 @@ class IPCHandlers {
       const url = typeof payload === 'string' ? payload : payload.url;
       const options = typeof payload === 'string' ? {} : (payload.options || {});
 
-      // Initialize file manager
+      // Initialize managers
       await fileManager.initialize();
+      await cacheManager.initialize();
 
-      // Step 1: Download video (25% of progress)
-      this.currentStep = 1;
-      this.sendProgress(1, 0, 'Starting download...');
+      let audioPath;
+      let videoTitle;
+      let usedCache = false;
 
-      const downloadResult = await youtubeDownloader.downloadVideo(
-        url,
-        (percent, message) => {
-          this.sendProgress(1, percent, message);
-        }
-      );
+      // Check cache first
+      const cached = await cacheManager.getCachedAudio(url);
 
-      this.tempFiles.push(downloadResult.filePath);
-      const videoTitle = downloadResult.videoInfo.title;
+      if (cached) {
+        // Use cached audio
+        this.currentStep = 1;
+        this.sendProgress(1, 100, 'Using cached audio (skip download)');
+        this.currentStep = 2;
+        this.sendProgress(2, 100, 'Using cached audio (skip conversion)');
 
-      // Step 2: Convert to MP3 (40% of progress)
-      this.currentStep = 2;
-      this.sendProgress(2, 0, 'Starting audio conversion...');
+        audioPath = cached.audioPath;
+        videoTitle = cached.videoTitle;
+        usedCache = true;
 
-      const audioResult = await audioConverter.convertToMp3(
-        downloadResult.filePath,
-        (percent, message) => {
-          this.sendProgress(2, percent, message);
-        }
-      );
+        console.log('Using cached audio:', audioPath);
+      } else {
+        // Step 1: Download video (25% of progress)
+        this.currentStep = 1;
+        this.sendProgress(1, 0, 'Starting download...');
 
-      this.tempFiles.push(audioResult.filePath);
+        const downloadResult = await youtubeDownloader.downloadVideo(
+          url,
+          (percent, message) => {
+            this.sendProgress(1, percent, message);
+          }
+        );
 
-      // Delete video file after conversion
-      await fileManager.deleteFile(downloadResult.filePath);
+        this.tempFiles.push(downloadResult.filePath);
+        videoTitle = downloadResult.videoInfo.title;
+
+        // Step 2: Convert to MP3 (40% of progress)
+        this.currentStep = 2;
+        this.sendProgress(2, 0, 'Starting audio conversion...');
+
+        const audioResult = await audioConverter.convertToMp3(
+          downloadResult.filePath,
+          (percent, message) => {
+            this.sendProgress(2, percent, message);
+          }
+        );
+
+        this.tempFiles.push(audioResult.filePath);
+        audioPath = audioResult.filePath;
+
+        // Delete video file after conversion
+        await fileManager.deleteFile(downloadResult.filePath);
+
+        // Cache the audio file
+        await cacheManager.cacheAudio(url, audioPath, videoTitle);
+        console.log('Audio cached for future use');
+      }
+
+      // Save MP3 to output folder (always do this)
+      const mp3Filename = fileManager.sanitizeFilename(`${videoTitle || 'audio'}.mp3`);
+      await fileManager.copyToOutput(audioPath, mp3Filename);
 
       // Step 3: Transcribe to MIDI (70% of progress)
       this.currentStep = 3;
       this.sendProgress(3, 0, 'Starting AI transcription...');
 
-      let transcribeInputPath = audioResult.filePath;
+      let transcribeInputPath = audioPath;
       let separationCleanupDir = null;
 
       if (options.useSeparation) {
-        this.sendProgress(3, 0, 'Separating vocals (2 stems)...');
+        this.sendProgress(3, 0, 'Separating vocals (Demucs)...');
         const separationResult = await stemSeparator.separateToAccompaniment(
-          audioResult.filePath,
+          audioPath,
           (percent, message) => {
             this.sendProgress(3, Math.min(20, Math.round(percent * 0.2)), message);
           }
@@ -143,24 +175,34 @@ class IPCHandlers {
 
       this.tempFiles.push(midiResult.filePath);
 
-      // Delete audio file after transcription
-      await fileManager.deleteFile(audioResult.filePath);
+      // Clean up separation output if used
+      if (separationCleanupDir) {
+        await fs.remove(separationCleanupDir);
+      }
+
+      // Only delete temp audio if not using cache
+      if (!usedCache && audioPath) {
+        await fileManager.deleteFile(audioPath);
+      }
 
       // Step 4: Export MIDI to output (100% of progress)
       this.currentStep = 4;
       this.sendProgress(4, 0, 'Saving MIDI file...');
 
-      const midiFilename = fileManager.sanitizeFilename(`${videoTitle || 'transcription'}.mid`);
+      // Add difficulty level to filename
+      const difficultyLabel = {
+        'beginner': '[초급]',
+        'intermediate': '[중급]',
+        'advanced': '[고급]'
+      };
+      const difficultyTag = difficultyLabel[options.qualityMode] || '[중급]';
+      const midiFilename = fileManager.sanitizeFilename(`$${difficultyTag} {videoTitle || 'transcription'}.mid`);
       const finalMidiPath = await fileManager.moveToOutput(midiResult.filePath, midiFilename);
 
       this.sendProgress(4, 100, 'MIDI saved');
 
       // Send completion event
       this.sendComplete(finalMidiPath, midiFilename);
-
-      if (separationCleanupDir) {
-        await fs.remove(separationCleanupDir);
-      }
 
       // Final cleanup
       await this.cleanup();

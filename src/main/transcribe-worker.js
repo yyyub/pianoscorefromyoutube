@@ -142,45 +142,142 @@ async function decodeAudioToFloat32(audioPath) {
   });
 }
 
+function quantizeTime(time, bpm, subdivision) {
+  // Quantize to nearest subdivision (e.g., 16th note)
+  const beatDuration = 60.0 / bpm;
+  const stepDuration = beatDuration / subdivision;
+  return Math.round(time / stepDuration) * stepDuration;
+}
+
+function estimateBPM(notes) {
+  if (!notes || notes.length < 4) return 120;
+
+  // Calculate intervals between note onsets
+  const sorted = [...notes].sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
+  const intervals = [];
+  for (let i = 1; i < Math.min(sorted.length, 200); i++) {
+    const diff = sorted[i].startTimeSeconds - sorted[i - 1].startTimeSeconds;
+    if (diff > 0.05 && diff < 2.0) {
+      intervals.push(diff);
+    }
+  }
+
+  if (intervals.length === 0) return 120;
+
+  // Find the most common interval (likely the beat)
+  intervals.sort((a, b) => a - b);
+  const median = intervals[Math.floor(intervals.length / 2)];
+  const bpm = Math.round(60.0 / median);
+
+  // Clamp to reasonable range
+  if (bpm < 40) return 80;
+  if (bpm > 240) return 120;
+  return bpm;
+}
+
+function mergeDuplicateNotes(notes) {
+  if (!notes || notes.length === 0) return notes;
+
+  // Sort by pitch then start time
+  const sorted = [...notes].sort((a, b) => {
+    if (a.pitchMidi !== b.pitchMidi) return a.pitchMidi - b.pitchMidi;
+    return a.startTimeSeconds - b.startTimeSeconds;
+  });
+
+  const merged = [];
+  let prev = null;
+
+  for (const note of sorted) {
+    if (prev && prev.pitchMidi === note.pitchMidi) {
+      const gap = note.startTimeSeconds - (prev.startTimeSeconds + prev.durationSeconds);
+      // Merge if gap is less than 0.05s (notes that are practically continuous)
+      if (gap < 0.05) {
+        prev.durationSeconds = (note.startTimeSeconds + note.durationSeconds) - prev.startTimeSeconds;
+        prev.amplitude = Math.max(prev.amplitude, note.amplitude);
+        continue;
+      }
+    }
+    merged.push(note);
+    prev = note;
+  }
+
+  return merged;
+}
+
 function applyQualityFilters(notes, mode) {
   if (!notes || notes.length === 0) return notes;
 
-  if (mode === 'high') {
-    const minDuration = 0.08;
-    const minVelocity = 0.15;
-    const maxPolyphony = 8;
+  let minDuration, minVelocity, maxPolyphony, quantizeSubdivision;
 
-    const filtered = notes.filter(note => (
-      note.durationSeconds >= minDuration && note.amplitude >= minVelocity
-    ));
-
-    filtered.sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
-
-    const grouped = [];
-    let group = [];
-    let lastTime = null;
-    const eps = 0.02;
-
-    filtered.forEach(note => {
-      if (lastTime === null || Math.abs(note.startTimeSeconds - lastTime) <= eps) {
-        group.push(note);
-      } else {
-        grouped.push(group);
-        group = [note];
-      }
-      lastTime = note.startTimeSeconds;
-    });
-    if (group.length) grouped.push(group);
-
-    const reduced = grouped.flatMap(g => g
-      .sort((a, b) => b.amplitude - a.amplitude)
-      .slice(0, maxPolyphony)
-    );
-
-    return reduced;
+  // Configure based on difficulty level
+  if (mode === 'beginner') {
+    // 초급: 매우 쉬운 악보 - 멜로디만, 박자 정렬 강함
+    minDuration = 0.20;
+    minVelocity = 0.35;
+    maxPolyphony = 3;
+    quantizeSubdivision = 2; // 8분음표 단위
+  } else if (mode === 'intermediate') {
+    // 중급: 적당한 난이도 - 화음 포함, 박자 정렬 중간
+    minDuration = 0.12;
+    minVelocity = 0.25;
+    maxPolyphony = 5;
+    quantizeSubdivision = 4; // 16분음표 단위
+  } else if (mode === 'advanced') {
+    // 고급: 원곡에 가까움 - 복잡한 화음, 박자 정렬 약함
+    minDuration = 0.08;
+    minVelocity = 0.20;
+    maxPolyphony = 8;
+    quantizeSubdivision = 8; // 32분음표 단위
+  } else {
+    // Default to intermediate
+    minDuration = 0.12;
+    minVelocity = 0.25;
+    maxPolyphony = 5;
+    quantizeSubdivision = 4;
   }
 
-  return notes;
+  // Step 1: Remove very short and very quiet notes
+  let filtered = notes.filter(note => (
+    note.durationSeconds >= minDuration && note.amplitude >= minVelocity
+  ));
+
+  // Step 2: Merge duplicate/overlapping notes
+  filtered = mergeDuplicateNotes(filtered);
+
+  // Step 3: Quantize note timing (박자 정렬)
+  const bpm = estimateBPM(filtered);
+  filtered = filtered.map(note => {
+    const qStart = quantizeTime(note.startTimeSeconds, bpm, quantizeSubdivision);
+    const qEnd = quantizeTime(note.startTimeSeconds + note.durationSeconds, bpm, quantizeSubdivision);
+    const qDuration = Math.max(qEnd - qStart, 60.0 / bpm / quantizeSubdivision);
+    return { ...note, startTimeSeconds: qStart, durationSeconds: qDuration };
+  });
+
+  // Step 4: Limit polyphony (simultaneous notes)
+  filtered.sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
+
+  const grouped = [];
+  let group = [];
+  let lastTime = null;
+  const eps = 0.03;
+
+  filtered.forEach(note => {
+    if (lastTime === null || Math.abs(note.startTimeSeconds - lastTime) <= eps) {
+      group.push(note);
+    } else {
+      grouped.push(group);
+      group = [note];
+    }
+    lastTime = note.startTimeSeconds;
+  });
+  if (group.length) grouped.push(group);
+
+  const reduced = grouped.flatMap(g => g
+    .sort((a, b) => b.amplitude - a.amplitude)
+    .slice(0, maxPolyphony)
+  );
+
+  return reduced;
 }
 
 async function run() {
@@ -230,9 +327,26 @@ async function run() {
 
     sendProgress(85, 'Generating MIDI...');
 
-    const onsetThresh = options.qualityMode === 'high' ? 0.35 : 0.25;
-    const frameThresh = options.qualityMode === 'high' ? 0.35 : 0.25;
-    const minNoteLen = options.qualityMode === 'high' ? 8 : 5;
+    // Adjust thresholds based on difficulty
+    let onsetThresh, frameThresh, minNoteLen;
+    if (options.qualityMode === 'beginner') {
+      onsetThresh = 0.6;  // Very strict - only clear notes
+      frameThresh = 0.5;
+      minNoteLen = 13;
+    } else if (options.qualityMode === 'intermediate') {
+      onsetThresh = 0.5;  // Moderate
+      frameThresh = 0.45;
+      minNoteLen = 11;
+    } else if (options.qualityMode === 'advanced') {
+      onsetThresh = 0.35; // More permissive
+      frameThresh = 0.35;
+      minNoteLen = 7;
+    } else {
+      // Default to intermediate
+      onsetThresh = 0.5;
+      frameThresh = 0.45;
+      minNoteLen = 11;
+    }
 
     const rawNotes = outputToNotesPoly(frames, onsets, onsetThresh, frameThresh, minNoteLen);
     const notesWithBends = addPitchBendsToNoteEvents(contours, rawNotes);

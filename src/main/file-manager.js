@@ -56,8 +56,34 @@ class FileManager {
   }
 
   async moveToOutput(sourcePath, filename) {
-    const outputPath = this.getOutputPath(filename);
-    await fs.move(sourcePath, outputPath, { overwrite: true });
+    let outputPath = this.getOutputPath(filename);
+
+    // Check if file exists and add timestamp if needed
+    if (await this.fileExists(outputPath)) {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      const ext = path.extname(filename);
+      const nameWithoutExt = path.basename(filename, ext);
+      const newFilename = `${nameWithoutExt}_${timestamp}${ext}`;
+      outputPath = this.getOutputPath(newFilename);
+    }
+
+    await fs.move(sourcePath, outputPath, { overwrite: false });
+    return outputPath;
+  }
+
+  async copyToOutput(sourcePath, filename) {
+    let outputPath = this.getOutputPath(filename);
+
+    // Check if file exists and add timestamp if needed
+    if (await this.fileExists(outputPath)) {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      const ext = path.extname(filename);
+      const nameWithoutExt = path.basename(filename, ext);
+      const newFilename = `${nameWithoutExt}_${timestamp}${ext}`;
+      outputPath = this.getOutputPath(newFilename);
+    }
+
+    await fs.copy(sourcePath, outputPath);
     return outputPath;
   }
 
