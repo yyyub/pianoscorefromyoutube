@@ -103,6 +103,11 @@ class StemSeparator {
 
     await fs.ensureDir(outputDir);
 
+    // Copy input to temp with safe ASCII filename (fix Korean encoding issue on Windows)
+    const safeInputName = `input-${runId}.mp3`;
+    const safeInputPath = fileManager.getTempPath(safeInputName);
+    await fs.copy(inputPath, safeInputPath);
+
     // Find FFmpeg path before creating the Promise
     const ffmpegDir = await this.findFfmpegPath();
 
@@ -124,7 +129,7 @@ class StemSeparator {
 
       const args = [
         runnerPath,
-        '--input', inputPath,
+        '--input', safeInputPath,
         '--output', outputDir,
         '--model', 'htdemucs'
       ];
@@ -198,8 +203,11 @@ class StemSeparator {
       });
     });
 
-    // Verify 4-stem output files exist
-    const baseName = path.parse(inputPath).name;
+    // Delete temp input file
+    await fileManager.deleteFile(safeInputPath);
+
+    // Verify 4-stem output files exist (use safe input name for stem dir)
+    const baseName = path.parse(safeInputPath).name;
     const stemDir = path.join(outputDir, 'htdemucs', baseName);
 
     const vocalsPath = path.join(stemDir, 'vocals.wav');
