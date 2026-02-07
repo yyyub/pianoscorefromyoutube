@@ -156,8 +156,13 @@ class IPCHandlers {
       this.currentStep = 3;
       let transcribeOptions = { ...options };
       let separationCleanupDir = null;
+      const shouldUseSeparation = Boolean(options.useSeparation) && options.sourceType !== 'piano-cover';
 
-      if (options.useSeparation) {
+      if (options.useSeparation && !shouldUseSeparation) {
+        this.sendProgress(3, 0, '피아노 커버 감지: 음원 분리 없이 전사합니다...');
+      }
+
+      if (shouldUseSeparation) {
         // 4-stem separation: vocals + bass + other (drums discarded)
         this.sendProgress(3, 0, '음원 분리 중 (Demucs AI)...');
 
@@ -180,12 +185,12 @@ class IPCHandlers {
       }
 
       // Transcribe to MIDI (worker handles 2-pass if melodyPath/accompPath provided)
-      const audioForTranscribe = options.useSeparation ? null : audioPath;
+      const audioForTranscribe = shouldUseSeparation ? null : audioPath;
       const midiResult = await transcriber.transcribeToMidi(
         audioForTranscribe,
         (percent, message) => {
-          const base = options.useSeparation ? 15 : 0;
-          const range = options.useSeparation ? 85 : 100;
+          const base = shouldUseSeparation ? 15 : 0;
+          const range = shouldUseSeparation ? 85 : 100;
           const scaled = Math.min(100, base + Math.round(percent / 100 * range));
           this.sendProgress(3, scaled, message);
         },

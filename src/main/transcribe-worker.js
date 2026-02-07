@@ -125,27 +125,53 @@ function quantizeTime(time, bpm, subdivision) {
   return Math.round(time / stepDuration) * stepDuration;
 }
 
+function percentile(values, p) {
+  if (!values || values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.floor(p * (sorted.length - 1))));
+  return sorted[idx];
+}
+
+function normalizeBPM(bpm) {
+  if (!Number.isFinite(bpm) || bpm <= 0) return 120;
+  let normalized = bpm;
+  while (normalized < 70) normalized *= 2;
+  while (normalized > 180) normalized /= 2;
+  return Math.max(55, Math.min(200, Math.round(normalized)));
+}
+
 function estimateBPM(notes) {
   if (!notes || notes.length < 4) return 120;
 
-  const sorted = [...notes].sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
+  const sorted = [...notes]
+    .map(note => Number(note.startTimeSeconds.toFixed(2)))
+    .sort((a, b) => a - b);
+
+  const uniqueOnsets = [];
+  for (let i = 0; i < sorted.length; i++) {
+    if (i === 0 || Math.abs(sorted[i] - sorted[i - 1]) > 0.03) {
+      uniqueOnsets.push(sorted[i]);
+    }
+  }
+
+  if (uniqueOnsets.length < 4) return 120;
+
   const intervals = [];
-  for (let i = 1; i < Math.min(sorted.length, 200); i++) {
-    const diff = sorted[i].startTimeSeconds - sorted[i - 1].startTimeSeconds;
-    if (diff > 0.05 && diff < 2.0) {
+  for (let i = 1; i < Math.min(uniqueOnsets.length, 400); i++) {
+    const diff = uniqueOnsets[i] - uniqueOnsets[i - 1];
+    if (diff >= 0.08 && diff <= 1.50) {
       intervals.push(diff);
     }
   }
 
   if (intervals.length === 0) return 120;
 
-  intervals.sort((a, b) => a - b);
-  const median = intervals[Math.floor(intervals.length / 2)];
-  const bpm = Math.round(60.0 / median);
+  const p40 = percentile(intervals, 0.40);
+  const p60 = percentile(intervals, 0.60);
+  if (!p40 || !p60) return 120;
 
-  if (bpm < 40) return 80;
-  if (bpm > 240) return 120;
-  return bpm;
+  const medianLike = (p40 + p60) / 2;
+  return normalizeBPM(60.0 / medianLike);
 }
 
 function mergeDuplicateNotes(notes) {
@@ -175,7 +201,96 @@ function mergeDuplicateNotes(notes) {
   return merged;
 }
 
-function applyQualityFilters(notes, mode, hand, bpm) {
+function splitHandsByRegister(notes) {
+  if (!notes || notes.length === 0) {
+    return { right: [], left: [], splitPitch: 60 };
+  }
+
+  const pitches = notes.map(note => note.pitchMidi);
+  const splitPitch = Math.max(52, Math.min(67, Math.round(percentile(pitches, 0.42) || 60)));
+  const softMargin = 3;
+
+  const ordered = [...notes].sort((a, b) => {
+    if (a.startTimeSeconds !== b.startTimeSeconds) {
+      return a.startTimeSeconds - b.startTimeSeconds;
+    }
+    return a.pitchMidi - b.pitchMidi;
+  });
+
+  const left = [];
+  const right = [];
+
+  let lastLeftPitch = splitPitch - 7;
+  let lastRightPitch = splitPitch + 7;
+
+  for (const note of ordered) {
+    if (note.pitchMidi <= splitPitch - softMargin) {
+      left.push(note);
+      lastLeftPitch = note.pitchMidi;
+      continue;
+    }
+    if (note.pitchMidi >= splitPitch + softMargin) {
+      right.push(note);
+      lastRightPitch = note.pitchMidi;
+      continue;
+    }
+
+    const leftDistance = Math.abs(note.pitchMidi - lastLeftPitch);
+    const rightDistance = Math.abs(note.pitchMidi - lastRightPitch);
+
+    if (leftDistance <= rightDistance) {
+      left.push(note);
+      lastLeftPitch = note.pitchMidi;
+    } else {
+      right.push(note);
+      lastRightPitch = note.pitchMidi;
+    }
+  }
+
+  if (left.length === 0 || right.length === 0) {
+    const fallbackRight = ordered.filter(note => note.pitchMidi >= 60);
+    const fallbackLeft = ordered.filter(note => note.pitchMidi < 60);
+    return { right: fallbackRight, left: fallbackLeft, splitPitch: 60 };
+  }
+
+  return { right, left, splitPitch };
+}
+
+function removeMelodicOutliers(notes, mode) {
+  if (!notes || notes.length < 3) return notes || [];
+
+  const sorted = [...notes].sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
+  const result = [];
+
+  const jumpThreshold = mode === 'advanced' ? 24 : 19;
+  const weakAmpThreshold = mode === 'advanced' ? 0.18 : 0.25;
+  const shortDurThreshold = mode === 'advanced' ? 0.12 : 0.20;
+
+  for (let i = 0; i < sorted.length; i++) {
+    const current = sorted[i];
+    if (i === 0 || i === sorted.length - 1) {
+      result.push(current);
+      continue;
+    }
+
+    const prev = sorted[i - 1];
+    const next = sorted[i + 1];
+    const jumpPrev = Math.abs(current.pitchMidi - prev.pitchMidi);
+    const jumpNext = Math.abs(next.pitchMidi - current.pitchMidi);
+
+    const isolatedLeap = jumpPrev >= jumpThreshold && jumpNext >= jumpThreshold;
+    const weakAndShort = current.amplitude <= weakAmpThreshold && current.durationSeconds <= shortDurThreshold;
+
+    if (isolatedLeap && weakAndShort) {
+      continue;
+    }
+    result.push(current);
+  }
+
+  return result;
+}
+
+function applyQualityFilters(notes, mode, hand, bpm, userFlags = {}) {
   if (!notes || notes.length === 0) return notes;
 
   let minDuration, minVelocity, maxPolyphony, quantizeSubdivision;
@@ -202,6 +317,15 @@ function applyQualityFilters(notes, mode, hand, bpm) {
     quantizeSubdivision = 4;
   }
 
+  if (userFlags.issueWrongNotes) {
+    minVelocity += 0.03;
+    minDuration += 0.01;
+  }
+
+  if (userFlags.issueOffbeat) {
+    quantizeSubdivision = Math.min(12, quantizeSubdivision * 2);
+  }
+
   // Step 1: Remove short and quiet notes
   let filtered = notes.filter(note => (
     note.durationSeconds >= minDuration && note.amplitude >= minVelocity
@@ -210,7 +334,10 @@ function applyQualityFilters(notes, mode, hand, bpm) {
   // Step 2: Merge overlapping notes
   filtered = mergeDuplicateNotes(filtered);
 
-  // Step 3: Quantize timing
+  // Step 3: Remove isolated noise-like notes
+  filtered = removeMelodicOutliers(filtered, mode);
+
+  // Step 4: Quantize timing
   filtered = filtered.map(note => {
     const qStart = quantizeTime(note.startTimeSeconds, bpm, quantizeSubdivision);
     const qEnd = quantizeTime(note.startTimeSeconds + note.durationSeconds, bpm, quantizeSubdivision);
@@ -218,7 +345,7 @@ function applyQualityFilters(notes, mode, hand, bpm) {
     return { ...note, startTimeSeconds: qStart, durationSeconds: qDuration };
   });
 
-  // Step 4: Limit polyphony
+  // Step 5: Limit polyphony
   filtered.sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
 
   const grouped = [];
@@ -242,7 +369,7 @@ function applyQualityFilters(notes, mode, hand, bpm) {
     .slice(0, maxPolyphony)
   );
 
-  return reduced;
+  return reduced.sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
 }
 
 /**
@@ -329,8 +456,9 @@ async function run() {
           basicPitch, options.accompPath, options.qualityMode,
           50, 40, '전체 전사'
         );
-        rightHandNotes = allNotes.filter(n => n.pitchMidi >= 60);
-        leftHandNotes = allNotes.filter(n => n.pitchMidi < 60);
+        const split = splitHandsByRegister(allNotes);
+        rightHandNotes = split.right;
+        leftHandNotes = split.left;
       } else {
         // Pass 2: Transcribe accompaniment → left hand
         sendProgress(50, '반주(베이스+기타) 전사 중...');
@@ -340,10 +468,10 @@ async function run() {
         );
 
         // Right hand: melody notes (vocals, keep notes >= 48 = C3)
-        rightHandNotes = melodyNotes.filter(n => n.pitchMidi >= 48);
+        rightHandNotes = melodyNotes.filter(n => n.pitchMidi >= 45);
 
         // Left hand: accompaniment notes (keep notes < 72 = C5 to avoid overlap with melody)
-        leftHandNotes = accompNotes.filter(n => n.pitchMidi < 72);
+        leftHandNotes = accompNotes.filter(n => n.pitchMidi < 74);
       }
     } else {
       // ====== SINGLE-PASS MODE: Split by pitch (no separation) ======
@@ -355,8 +483,9 @@ async function run() {
         10, 80, '전사'
       );
 
-      rightHandNotes = allNotes.filter(n => n.pitchMidi >= 60);
-      leftHandNotes = allNotes.filter(n => n.pitchMidi < 60);
+      const split = splitHandsByRegister(allNotes);
+      rightHandNotes = split.right;
+      leftHandNotes = split.left;
     }
 
     if (isCancelled) throw new Error('Cancelled');
@@ -368,8 +497,13 @@ async function run() {
     const bpm = estimateBPM(allNotes);
 
     // Apply quality filters per hand
-    const filteredRight = applyQualityFilters(rightHandNotes, options.qualityMode, 'right', bpm);
-    const filteredLeft = applyQualityFilters(leftHandNotes, options.qualityMode, 'left', bpm);
+    const filterFlags = {
+      issueOffbeat: Boolean(options.issueOffbeat),
+      issueWrongNotes: Boolean(options.issueWrongNotes)
+    };
+
+    const filteredRight = applyQualityFilters(rightHandNotes, options.qualityMode, 'right', bpm, filterFlags);
+    const filteredLeft = applyQualityFilters(leftHandNotes, options.qualityMode, 'left', bpm, filterFlags);
 
     console.log(`BPM: ${bpm}, Right hand: ${filteredRight.length} notes, Left hand: ${filteredLeft.length} notes`);
 

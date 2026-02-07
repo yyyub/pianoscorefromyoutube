@@ -2,6 +2,7 @@
 let isProcessing = false;
 let generatedPdfPath = null;
 let generatedOutputDir = null;
+let latestRecommendation = null;
 
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
@@ -19,6 +20,21 @@ function initializeEventListeners() {
   const openFolderBtn = document.getElementById('open-folder-btn');
   const useSeparationToggle = document.getElementById('use-separation');
   const qualityModeSelect = document.getElementById('quality-mode');
+  const sourceTypeSelect = document.getElementById('source-type');
+  const targetPrioritySelect = document.getElementById('target-priority');
+  const issueOffbeatToggle = document.getElementById('issue-offbeat');
+  const issueWrongNotesToggle = document.getElementById('issue-wrong-notes');
+  const applyRecommendedBtn = document.getElementById('apply-recommended-btn');
+
+  const refreshRecommendation = () => {
+    latestRecommendation = getRecommendation({
+      sourceType: sourceTypeSelect ? sourceTypeSelect.value : 'unknown',
+      targetPriority: targetPrioritySelect ? targetPrioritySelect.value : 'balanced',
+      offbeat: issueOffbeatToggle ? issueOffbeatToggle.checked : false,
+      wrongNotes: issueWrongNotesToggle ? issueWrongNotesToggle.checked : false
+    });
+    renderRecommendation(latestRecommendation);
+  };
 
   // Start processing
   startBtn.addEventListener('click', async () => {
@@ -30,9 +46,22 @@ function initializeEventListeners() {
     }
 
     clearUrlError();
+
+    if (!latestRecommendation) {
+      refreshRecommendation();
+    }
+
+    if (latestRecommendation) {
+      addLog(`권장: ${latestRecommendation.summary}`, 'info');
+    }
+
     await startProcessing(url, {
       useSeparation: useSeparationToggle ? useSeparationToggle.checked : false,
-      qualityMode: qualityModeSelect ? qualityModeSelect.value : 'normal'
+      qualityMode: qualityModeSelect ? qualityModeSelect.value : 'normal',
+      sourceType: sourceTypeSelect ? sourceTypeSelect.value : 'unknown',
+      targetPriority: targetPrioritySelect ? targetPrioritySelect.value : 'balanced',
+      issueOffbeat: issueOffbeatToggle ? issueOffbeatToggle.checked : false,
+      issueWrongNotes: issueWrongNotesToggle ? issueWrongNotesToggle.checked : false
     });
   });
 
@@ -80,6 +109,23 @@ function initializeEventListeners() {
     e.preventDefault();
     showAboutDialog();
   });
+
+  if (applyRecommendedBtn) {
+    applyRecommendedBtn.addEventListener('click', () => {
+      if (!latestRecommendation) {
+        refreshRecommendation();
+      }
+      applyRecommendation(latestRecommendation, useSeparationToggle, qualityModeSelect);
+    });
+  }
+
+  [sourceTypeSelect, targetPrioritySelect, issueOffbeatToggle, issueWrongNotesToggle].forEach(el => {
+    if (!el) return;
+    el.addEventListener('change', refreshRecommendation);
+  });
+
+  refreshRecommendation();
+  applyRecommendation(latestRecommendation, useSeparationToggle, qualityModeSelect, false);
 }
 
 function setupIPCListeners() {
@@ -133,10 +179,23 @@ function validateYouTubeUrl(url) {
 }
 
 function prepareUI() {
-  // Disable input
+  // Disable input and controls
   document.getElementById('youtube-url').disabled = true;
   document.getElementById('start-btn').disabled = true;
   document.getElementById('cancel-btn').disabled = false;
+  const controlIds = [
+    'use-separation',
+    'quality-mode',
+    'source-type',
+    'target-priority',
+    'issue-offbeat',
+    'issue-wrong-notes',
+    'apply-recommended-btn'
+  ];
+  controlIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = true;
+  });
 
   // Show progress section
   document.getElementById('progress-section').classList.add('active');
@@ -149,10 +208,23 @@ function prepareUI() {
 }
 
 function resetUI() {
-  // Enable input
+  // Enable input and controls
   document.getElementById('youtube-url').disabled = false;
   document.getElementById('start-btn').disabled = false;
   document.getElementById('cancel-btn').disabled = true;
+  const controlIds = [
+    'use-separation',
+    'quality-mode',
+    'source-type',
+    'target-priority',
+    'issue-offbeat',
+    'issue-wrong-notes',
+    'apply-recommended-btn'
+  ];
+  controlIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = false;
+  });
 
   // Reset progress
   resetProgress();
@@ -174,6 +246,19 @@ function showSuccess(pdfPath, filename) {
   document.getElementById('youtube-url').disabled = false;
   document.getElementById('start-btn').disabled = false;
   document.getElementById('cancel-btn').disabled = true;
+  const controlIds = [
+    'use-separation',
+    'quality-mode',
+    'source-type',
+    'target-priority',
+    'issue-offbeat',
+    'issue-wrong-notes',
+    'apply-recommended-btn'
+  ];
+  controlIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = false;
+  });
 
   addLog(`변환 완료: ${filename}`, 'success');
   loadHistory();
@@ -236,4 +321,89 @@ function showHelpDialog() {
 
 function showAboutDialog() {
   addLog('YouTube to Piano Sheet Music v1.0.0 - Powered by Spotify Basic Pitch AI', 'info');
+}
+
+function getRecommendation({ sourceType, targetPriority, offbeat, wrongNotes }) {
+  let useSeparation = false;
+  let qualityMode = 'intermediate';
+  const reasons = [];
+
+  if (sourceType === 'original') {
+    useSeparation = true;
+    reasons.push('원곡은 악기/보컬이 섞여 있어 음원 분리 사용이 유리합니다.');
+  } else if (sourceType === 'piano-cover') {
+    useSeparation = false;
+    reasons.push('피아노 커버는 분리 시 음 손실이 생길 수 있어 분리 비활성화가 안정적입니다.');
+  } else {
+    useSeparation = true;
+    reasons.push('곡 유형이 불확실해 보수적으로 음원 분리를 권장합니다.');
+  }
+
+  if (targetPriority === 'accuracy') {
+    qualityMode = 'advanced';
+    reasons.push('유사도 우선이므로 고급 모드로 세부 음표를 더 보존합니다.');
+  } else if (targetPriority === 'speed') {
+    qualityMode = 'beginner';
+    reasons.push('빠른 초안 우선이라 초급 모드로 처리량을 줄입니다.');
+  } else {
+    qualityMode = 'intermediate';
+    reasons.push('균형 목표이므로 중급 모드를 권장합니다.');
+  }
+
+  if (offbeat) {
+    qualityMode = 'advanced';
+    reasons.push('엇박 문제가 체크되어 리듬 해상도 확보를 위해 고급 모드로 상향합니다.');
+  }
+
+  if (wrongNotes) {
+    if (sourceType === 'piano-cover') {
+      useSeparation = false;
+    }
+    if (targetPriority !== 'accuracy') {
+      qualityMode = 'intermediate';
+    }
+    reasons.push('이상한 음이 많다면 과도한 분리/과소 필터링을 피하는 설정이 유리합니다.');
+  }
+
+  const qualityLabel = {
+    beginner: '초급',
+    intermediate: '중급',
+    advanced: '고급'
+  };
+
+  const summary = `음원 분리 ${useSeparation ? 'ON' : 'OFF'} + ${qualityLabel[qualityMode]} 모드`;
+  return { useSeparation, qualityMode, reasons, summary };
+}
+
+function renderRecommendation(recommendation) {
+  if (!recommendation) return;
+
+  const recommendationText = document.getElementById('recommendation-text');
+  const settingSummary = document.getElementById('setting-summary');
+
+  if (settingSummary) {
+    settingSummary.textContent = `권장 설정: ${recommendation.summary}`;
+  }
+
+  if (recommendationText) {
+    recommendationText.innerHTML = recommendation.reasons
+      .map(reason => `<div class="recommendation-item">- ${reason}</div>`)
+      .join('');
+  }
+}
+
+function applyRecommendation(recommendation, useSeparationToggle, qualityModeSelect, withLog = true) {
+  if (!recommendation) return;
+
+  if (useSeparationToggle) {
+    useSeparationToggle.checked = recommendation.useSeparation;
+  }
+
+  if (qualityModeSelect) {
+    qualityModeSelect.value = recommendation.qualityMode;
+  }
+
+  if (withLog) {
+    addLog(`권장 설정 적용: ${recommendation.summary}`, 'success');
+  }
 }
