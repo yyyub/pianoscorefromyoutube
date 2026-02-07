@@ -14,11 +14,11 @@ class IPCHandlers {
     this.currentStep = 0;
     this.mainWindow = null;
     this.tempFiles = [];
+    this.setupHandlers(); // Register IPC handlers immediately
   }
 
   initialize(mainWindow) {
     this.mainWindow = mainWindow;
-    this.setupHandlers();
   }
 
   setupHandlers() {
@@ -53,7 +53,7 @@ class IPCHandlers {
       youtubeDownloader.cancel();
       audioConverter.cancel();
       transcriber.cancel();
-      sheetGenerator.cancel();
+      stemSeparator.cancel();
 
       this.isProcessing = false;
       await this.cleanup();
@@ -72,6 +72,19 @@ class IPCHandlers {
     ipcMain.handle('get-output-dir', async () => {
       return fileManager.getOutputDir();
     });
+
+    // Get conversion history from cache
+    ipcMain.handle('get-history', async () => {
+      await cacheManager.initialize();
+      const entries = Object.values(cacheManager.cacheIndex)
+        .filter(entry => entry.url && entry.videoTitle)
+        .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      return entries.map(entry => ({
+        url: entry.url,
+        title: entry.videoTitle,
+        timestamp: entry.timestamp
+      }));
+    });
   }
 
   async processVideo(payload) {
@@ -87,15 +100,15 @@ class IPCHandlers {
       let videoTitle;
       let usedCache = false;
 
-      // Check cache first
+      // Check cache for raw audio (always stores raw MP3, separation done each time)
       const cached = await cacheManager.getCachedAudio(url);
 
       if (cached) {
-        // Use cached audio
+        // Cache hit: skip download + convert
         this.currentStep = 1;
-        this.sendProgress(1, 100, 'Using cached audio (skip download)');
+        this.sendProgress(1, 100, '캐시 사용 (다운로드 생략)');
         this.currentStep = 2;
-        this.sendProgress(2, 100, 'Using cached audio (skip conversion)');
+        this.sendProgress(2, 100, '캐시 사용 (변환 생략)');
 
         audioPath = cached.audioPath;
         videoTitle = cached.videoTitle;
@@ -103,9 +116,9 @@ class IPCHandlers {
 
         console.log('Using cached audio:', audioPath);
       } else {
-        // Step 1: Download video (25% of progress)
+        // Step 1: Download video
         this.currentStep = 1;
-        this.sendProgress(1, 0, 'Starting download...');
+        this.sendProgress(1, 0, '다운로드 시작...');
 
         const downloadResult = await youtubeDownloader.downloadVideo(
           url,
@@ -117,9 +130,9 @@ class IPCHandlers {
         this.tempFiles.push(downloadResult.filePath);
         videoTitle = downloadResult.videoInfo.title;
 
-        // Step 2: Convert to MP3 (40% of progress)
+        // Step 2: Convert to MP3
         this.currentStep = 2;
-        this.sendProgress(2, 0, 'Starting audio conversion...');
+        this.sendProgress(2, 0, '오디오 변환 중...');
 
         const audioResult = await audioConverter.convertToMp3(
           downloadResult.filePath,
@@ -134,75 +147,87 @@ class IPCHandlers {
         // Delete video file after conversion
         await fileManager.deleteFile(downloadResult.filePath);
 
-        // Cache the audio file
+        // Cache the raw audio
         await cacheManager.cacheAudio(url, audioPath, videoTitle);
-        console.log('Audio cached for future use');
+        console.log('Raw audio cached');
       }
 
-      // Save MP3 to output folder (always do this)
-      const mp3Filename = fileManager.sanitizeFilename(`${videoTitle || 'audio'}.mp3`);
-      await fileManager.copyToOutput(audioPath, mp3Filename);
-
-      // Step 3: Transcribe to MIDI (70% of progress)
+      // Step 3: AI Processing (separation + transcription)
       this.currentStep = 3;
-      this.sendProgress(3, 0, 'Starting AI transcription...');
-
-      let transcribeInputPath = audioPath;
+      let transcribeOptions = { ...options };
       let separationCleanupDir = null;
 
       if (options.useSeparation) {
-        this.sendProgress(3, 0, 'Separating vocals (Demucs)...');
-        const separationResult = await stemSeparator.separateToAccompaniment(
-          audioPath,
+        // 4-stem separation: vocals + bass + other (drums discarded)
+        this.sendProgress(3, 0, '음원 분리 중 (Demucs AI)...');
+
+        const cachedForSep = usedCache ? audioPath : (await cacheManager.getCachedAudio(url)).audioPath;
+        const separationResult = await stemSeparator.separateStems(
+          cachedForSep,
           (percent, message) => {
-            this.sendProgress(3, Math.min(20, Math.round(percent * 0.2)), message);
+            this.sendProgress(3, Math.min(15, Math.round(percent * 0.15)), message);
           }
         );
-        transcribeInputPath = separationResult.filePath;
+
+        // Pass melody and accompaniment paths to transcriber
+        transcribeOptions.melodyPath = separationResult.melodyPath;
+        transcribeOptions.accompPath = separationResult.accompPath;
         separationCleanupDir = separationResult.cleanupDir;
+
+        this.sendProgress(3, 15, 'AI 전사 시작...');
+      } else {
+        this.sendProgress(3, 0, 'AI 전사 시작...');
       }
 
+      // Transcribe to MIDI (worker handles 2-pass if melodyPath/accompPath provided)
+      const audioForTranscribe = options.useSeparation ? null : audioPath;
       const midiResult = await transcriber.transcribeToMidi(
-        transcribeInputPath,
+        audioForTranscribe,
         (percent, message) => {
-          const scaled = options.useSeparation
-            ? Math.min(100, 20 + Math.round(percent * 0.8))
-            : percent;
+          const base = options.useSeparation ? 15 : 0;
+          const range = options.useSeparation ? 85 : 100;
+          const scaled = Math.min(100, base + Math.round(percent / 100 * range));
           this.sendProgress(3, scaled, message);
         },
-        options
+        transcribeOptions
       );
 
       this.tempFiles.push(midiResult.filePath);
 
-      // Clean up separation output if used
+      // Clean up separation temp dir
       if (separationCleanupDir) {
         await fs.remove(separationCleanupDir);
       }
 
-      // Only delete temp audio if not using cache
-      if (!usedCache && audioPath) {
-        await fileManager.deleteFile(audioPath);
+      // Step 4: Save to output subfolder
+      this.currentStep = 4;
+      this.sendProgress(4, 0, '파일 저장 중...');
+
+      // Create subfolder: output/<videoTitle>/
+      const folderName = videoTitle || 'transcription';
+      const outputSubDir = await fileManager.createOutputSubDir(folderName);
+
+      // Copy original audio to subfolder
+      const cachedAudio = await cacheManager.getCachedAudio(url);
+      if (cachedAudio) {
+        const audioCopyName = `${fileManager.sanitizeFilename(folderName)}.mp3`;
+        await fileManager.copyToDir(cachedAudio.audioPath, outputSubDir, audioCopyName);
       }
 
-      // Step 4: Export MIDI to output (100% of progress)
-      this.currentStep = 4;
-      this.sendProgress(4, 0, 'Saving MIDI file...');
-
-      // Add difficulty level to filename
+      // Move MIDI to subfolder
       const difficultyLabel = {
         'beginner': '[초급]',
         'intermediate': '[중급]',
         'advanced': '[고급]'
       };
       const difficultyTag = difficultyLabel[options.qualityMode] || '[중급]';
-      const midiFilename = fileManager.sanitizeFilename(`$${difficultyTag} {videoTitle || 'transcription'}.mid`);
-      const finalMidiPath = await fileManager.moveToOutput(midiResult.filePath, midiFilename);
+      const midiFilename = `${difficultyTag} ${fileManager.sanitizeFilename(folderName)}.mid`;
+      const finalMidiPath = await fileManager.moveToDir(midiResult.filePath, outputSubDir, midiFilename);
 
-      this.sendProgress(4, 100, 'MIDI saved');
+      this.sendProgress(4, 100, '저장 완료');
 
       // Send completion event
-      this.sendComplete(finalMidiPath, midiFilename);
+      this.sendComplete(finalMidiPath, midiFilename, outputSubDir);
 
       // Final cleanup
       await this.cleanup();
@@ -244,12 +269,13 @@ class IPCHandlers {
     });
   }
 
-  sendComplete(pdfPath, filename) {
+  sendComplete(pdfPath, filename, outputDir) {
     if (!this.mainWindow) return;
 
     this.mainWindow.webContents.send('processing-complete', {
       pdfPath,
-      filename
+      filename,
+      outputDir
     });
   }
 
@@ -261,14 +287,5 @@ class IPCHandlers {
 }
 
 const ipcHandlers = new IPCHandlers();
-
-// Initialize when required
-const { BrowserWindow } = require('electron');
-setTimeout(() => {
-  const mainWindow = BrowserWindow.getAllWindows()[0];
-  if (mainWindow) {
-    ipcHandlers.initialize(mainWindow);
-  }
-}, 1000);
 
 module.exports = ipcHandlers;

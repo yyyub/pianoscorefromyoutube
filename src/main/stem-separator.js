@@ -51,7 +51,51 @@ class StemSeparator {
     return null;
   }
 
-  async separateToAccompaniment(inputPath, progressCallback) {
+  async getFfmpegBinary() {
+    const dir = await this.findFfmpegPath();
+    if (dir) {
+      return path.join(dir, 'ffmpeg.exe');
+    }
+    return 'ffmpeg';
+  }
+
+  /**
+   * Mix bass.wav + other.wav into a single accompaniment file using FFmpeg.
+   */
+  async mixStemsToAccompaniment(bassPath, otherPath, outputPath) {
+    const ffmpegBin = await this.getFfmpegBinary();
+
+    return new Promise((resolve, reject) => {
+      const args = [
+        '-y',
+        '-i', bassPath,
+        '-i', otherPath,
+        '-filter_complex', '[0:a][1:a]amix=inputs=2:duration=longest',
+        '-ac', '1',
+        '-ar', '22050',
+        outputPath
+      ];
+
+      const proc = spawn(ffmpegBin, args, { windowsHide: true });
+      let stderr = '';
+      proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+      proc.on('error', (err) => reject(new Error(`FFmpeg mix error: ${err.message}`)));
+      proc.on('close', (code) => {
+        if (code !== 0) {
+          reject(new Error(`FFmpeg mix failed (code ${code}): ${stderr}`));
+        } else {
+          resolve(outputPath);
+        }
+      });
+    });
+  }
+
+  /**
+   * Separate audio into vocals (melody) and accompaniment (bass + other).
+   * Uses full 4-stem Demucs: vocals, drums, bass, other.
+   * Returns { melodyPath, accompPath, cleanupDir }.
+   */
+  async separateStems(inputPath, progressCallback) {
     this.isCancelled = false;
 
     const runId = Date.now().toString();
@@ -62,15 +106,22 @@ class StemSeparator {
     // Find FFmpeg path before creating the Promise
     const ffmpegDir = await this.findFfmpegPath();
 
-    return new Promise((resolve, reject) => {
+    const runnerPath = path.join(__dirname, 'demucs_runner.py');
+
+    // Use Python from virtual environment directly
+    const pythonPath = path.join(fileManager.rootDir, '.venv', 'Scripts', 'python.exe');
+
+    // Check if Python exists before spawning (must be outside Promise constructor)
+    if (!await fs.pathExists(pythonPath)) {
+      throw new Error(`Python not found at: ${pythonPath}. Please ensure virtual environment is set up.`);
+    }
+
+    // Run Demucs 4-stem separation
+    await new Promise((resolve, reject) => {
       if (progressCallback) {
-        progressCallback(0, 'Separating vocals (Demucs)...');
+        progressCallback(0, '음원 분리 중 (Demucs AI)...');
       }
 
-      const runnerPath = path.join(__dirname, 'demucs_runner.py');
-
-      // Use Python from virtual environment directly
-      const pythonPath = path.join(fileManager.rootDir, '.venv', 'Scripts', 'python.exe');
       const args = [
         runnerPath,
         '--input', inputPath,
@@ -78,9 +129,7 @@ class StemSeparator {
         '--model', 'htdemucs'
       ];
 
-      console.log('Running Demucs with Python:', pythonPath);
-      console.log('Args:', args);
-      console.log('Working directory:', fileManager.rootDir);
+      console.log('Running Demucs 4-stem with Python:', pythonPath);
       console.log('Input file:', inputPath);
       console.log('Output dir:', outputDir);
 
@@ -88,18 +137,20 @@ class StemSeparator {
       const env = { ...process.env };
 
       if (ffmpegDir) {
-        // Add FFmpeg directory to PATH
         env.PATH = `${ffmpegDir};${env.PATH}`;
-        console.log('Added FFmpeg to PATH:', ffmpegDir);
-      } else {
-        console.warn('FFmpeg not found, Demucs may fail to load audio files');
       }
 
-      this.currentProcess = spawn(pythonPath, args, {
-        windowsHide: true,
-        cwd: fileManager.rootDir,
-        env: env
-      });
+      try {
+        this.currentProcess = spawn(pythonPath, args, {
+          windowsHide: true,
+          cwd: fileManager.rootDir,
+          env: env,
+          shell: true
+        });
+      } catch (spawnError) {
+        reject(new Error(`Failed to spawn Python process: ${spawnError.message}`));
+        return;
+      }
 
       let stdout = '';
       let stderr = '';
@@ -112,14 +163,11 @@ class StemSeparator {
         const data = chunk.toString();
         stderr += data;
 
-        // Demucs progress output goes to stderr, so we can parse it here
-        // Progress bars contain % character, warnings contain "Warning"
         if (data.includes('%') && progressCallback) {
-          // This is just progress, not an error
           const match = data.match(/(\d+)%/);
           if (match) {
             const percent = parseInt(match[1], 10);
-            progressCallback(percent, `Separating vocals (${percent}%)...`);
+            progressCallback(percent, `음원 분리 중 (${percent}%)...`);
           }
         }
       });
@@ -128,7 +176,7 @@ class StemSeparator {
         reject(new Error(`Demucs failed to start: ${error.message}`));
       });
 
-      this.currentProcess.on('close', async (code) => {
+      this.currentProcess.on('close', (code) => {
         this.currentProcess = null;
 
         if (this.isCancelled) {
@@ -137,48 +185,54 @@ class StemSeparator {
         }
 
         if (code !== 0) {
-          // Log full output for debugging
-          console.error('=== Demucs stderr ===');
-          console.error(stderr);
-          console.error('=== Demucs stdout ===');
-          console.error(stdout);
-          console.error('=== End of output ===');
-
-          // Filter out progress bars from error message
           const errorLines = stderr.split('\n').filter(line =>
             !line.includes('%|') &&
             !line.includes('[00:') &&
             line.trim() !== ''
           ).join('\n');
-
-          const fullError = `Exit code ${code}\nStderr: ${errorLines}\nStdout: ${stdout}`;
-          reject(new Error(`Demucs failed: ${fullError}`));
+          reject(new Error(`Demucs failed (code ${code}): ${errorLines}`));
           return;
         }
 
-        try {
-          const baseName = path.parse(inputPath).name;
-          const accompanimentPath = path.join(outputDir, 'htdemucs', baseName, 'no_vocals.wav');
-
-          const exists = await fileManager.fileExists(accompanimentPath);
-          if (!exists) {
-            reject(new Error('Demucs output not found. Please confirm Demucs is installed.'));
-            return;
-          }
-
-          if (progressCallback) {
-            progressCallback(100, 'Separation complete');
-          }
-
-          resolve({
-            filePath: accompanimentPath,
-            cleanupDir: outputDir
-          });
-        } catch (error) {
-          reject(new Error(`Demucs output error: ${error.message}`));
-        }
+        resolve();
       });
     });
+
+    // Verify 4-stem output files exist
+    const baseName = path.parse(inputPath).name;
+    const stemDir = path.join(outputDir, 'htdemucs', baseName);
+
+    const vocalsPath = path.join(stemDir, 'vocals.wav');
+    const bassPath = path.join(stemDir, 'bass.wav');
+    const otherPath = path.join(stemDir, 'other.wav');
+
+    const [vocalsExists, bassExists, otherExists] = await Promise.all([
+      fileManager.fileExists(vocalsPath),
+      fileManager.fileExists(bassPath),
+      fileManager.fileExists(otherPath)
+    ]);
+
+    if (!vocalsExists || !bassExists || !otherExists) {
+      throw new Error('Demucs 4-stem output not found. Please confirm Demucs is installed.');
+    }
+
+    // Mix bass + other → accompaniment
+    if (progressCallback) {
+      progressCallback(95, '반주 트랙 합성 중...');
+    }
+
+    const accompPath = path.join(stemDir, 'accomp.wav');
+    await this.mixStemsToAccompaniment(bassPath, otherPath, accompPath);
+
+    if (progressCallback) {
+      progressCallback(100, '음원 분리 완료');
+    }
+
+    return {
+      melodyPath: vocalsPath,
+      accompPath: accompPath,
+      cleanupDir: outputDir
+    };
   }
 
   cancel() {

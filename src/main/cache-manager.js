@@ -1,6 +1,7 @@
 const fs = require('fs-extra');
 const path = require('path');
 const crypto = require('crypto');
+const sanitize = require('sanitize-filename');
 
 class CacheManager {
   constructor() {
@@ -47,7 +48,6 @@ class CacheManager {
     // Check if file still exists
     const exists = await fs.pathExists(entry.audioPath);
     if (!exists) {
-      // Clean up invalid entry
       delete this.cacheIndex[urlHash];
       await this.saveIndex();
       return null;
@@ -62,7 +62,8 @@ class CacheManager {
 
   async cacheAudio(url, audioPath, videoTitle) {
     const urlHash = this.generateUrlHash(url);
-    const cachedPath = path.join(this.cacheDir, `${urlHash}.mp3`);
+    const safeName = sanitize(videoTitle || urlHash, { replacement: '_' });
+    const cachedPath = path.join(this.cacheDir, `${safeName}.mp3`);
 
     // Copy audio file to cache
     await fs.copy(audioPath, cachedPath);

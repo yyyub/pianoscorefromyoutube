@@ -1,11 +1,13 @@
 // Main application logic for renderer process
 let isProcessing = false;
 let generatedPdfPath = null;
+let generatedOutputDir = null;
 
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
   initializeEventListeners();
   setupIPCListeners();
+  loadHistory();
 });
 
 function initializeEventListeners() {
@@ -60,11 +62,11 @@ function initializeEventListeners() {
     }
   });
 
-  // Open output folder
+  // Open output folder (open the song's subfolder if available)
   openFolderBtn.addEventListener('click', async () => {
-    const outputDir = await window.electronAPI.getOutputDir();
-    if (outputDir) {
-      await window.electronAPI.openPdf(outputDir);
+    const dir = generatedOutputDir || await window.electronAPI.getOutputDir();
+    if (dir) {
+      await window.electronAPI.openPdf(dir);
     }
   });
 
@@ -96,6 +98,7 @@ function setupIPCListeners() {
   // Completion events
   window.electronAPI.onComplete((data) => {
     generatedPdfPath = data.pdfPath;
+    generatedOutputDir = data.outputDir || null;
     showSuccess(data.pdfPath, data.filename);
     isProcessing = false;
   });
@@ -172,7 +175,8 @@ function showSuccess(pdfPath, filename) {
   document.getElementById('start-btn').disabled = false;
   document.getElementById('cancel-btn').disabled = true;
 
-  addLog(`✅ 변환 완료: ${filename}`, 'success');
+  addLog(`변환 완료: ${filename}`, 'success');
+  loadHistory();
 }
 
 function showUrlError(message) {
@@ -189,6 +193,41 @@ function clearUrlError() {
 
   input.classList.remove('error');
   errorSpan.textContent = '';
+}
+
+async function loadHistory() {
+  try {
+    const history = await window.electronAPI.getHistory();
+    const listEl = document.getElementById('history-list');
+
+    if (!history || history.length === 0) {
+      listEl.innerHTML = '<div class="history-empty">변환 기록이 없습니다.</div>';
+      return;
+    }
+
+    listEl.innerHTML = history.map(entry => {
+      const date = new Date(entry.timestamp);
+      const dateStr = `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`;
+      const title = entry.title.length > 40 ? entry.title.slice(0, 40) + '...' : entry.title;
+      return `<div class="history-item" data-url="${entry.url}" title="${entry.title}">
+        <span class="history-title">${title}</span>
+        <span class="history-date">${dateStr}</span>
+      </div>`;
+    }).join('');
+
+    // Click to fill URL input
+    listEl.querySelectorAll('.history-item').forEach(item => {
+      item.addEventListener('click', () => {
+        if (isProcessing) return;
+        const urlInput = document.getElementById('youtube-url');
+        urlInput.value = item.dataset.url;
+        clearUrlError();
+        urlInput.focus();
+      });
+    });
+  } catch (error) {
+    console.error('Failed to load history:', error);
+  }
 }
 
 function showHelpDialog() {

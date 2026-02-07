@@ -3,20 +3,28 @@ name = "music"
 version = "0.1.0"
 description = "Local music utilities (Demucs stem separation)"
 readme = "README.md"
-requires-python = ">=3.9,<3.13"
+requires-python = ">=3.11,<3.12"
 dependencies = [
-  # Demucs - 최신 음원 분리 라이브러리 (PyTorch 기반)
+  "torch>=2.2.0",
+  "torchaudio>=2.2.0",
   "demucs>=4.0.0",
-  # SoundFile - torchaudio WAV 저장을 위한 백엔드
   "soundfile>=0.12.0",
 ]
 
 [tool.uv]
-# uv가 Windows/AMD64 기준으로만 해석(락)하도록 강제해서
-# Linux-only wheel 같은 게 섞여 들어가는 걸 줄입니다.
+# Windows/AMD64 전용
 required-environments = [
   "sys_platform == 'win32' and platform_machine == 'AMD64'",
 ]
+
+# PyTorch CUDA 11.8 인덱스 (GTX 1660 Super / Turing CC 7.5)
+[[tool.uv.index]]
+name = "pytorch-cu118"
+url = "https://download.pytorch.org/whl/cu118"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu118" }
+torchaudio = { index = "pytorch-cu118" }
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

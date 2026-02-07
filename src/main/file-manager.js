@@ -105,6 +105,43 @@ class FileManager {
     }
   }
 
+  async createOutputSubDir(folderName) {
+    const safeName = sanitize(folderName, { replacement: '_' });
+    const subDir = path.join(this.outputDir, safeName);
+    await fs.ensureDir(subDir);
+    return subDir;
+  }
+
+  async moveToDir(sourcePath, destDir, filename) {
+    const safeName = sanitize(filename, { replacement: '_' });
+    let destPath = path.join(destDir, safeName);
+
+    if (await this.fileExists(destPath)) {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      const ext = path.extname(safeName);
+      const nameWithoutExt = path.basename(safeName, ext);
+      destPath = path.join(destDir, `${nameWithoutExt}_${timestamp}${ext}`);
+    }
+
+    await fs.move(sourcePath, destPath, { overwrite: false });
+    return destPath;
+  }
+
+  async copyToDir(sourcePath, destDir, filename) {
+    const safeName = sanitize(filename, { replacement: '_' });
+    let destPath = path.join(destDir, safeName);
+
+    if (await this.fileExists(destPath)) {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      const ext = path.extname(safeName);
+      const nameWithoutExt = path.basename(safeName, ext);
+      destPath = path.join(destDir, `${nameWithoutExt}_${timestamp}${ext}`);
+    }
+
+    await fs.copy(sourcePath, destPath);
+    return destPath;
+  }
+
   getOutputDir() {
     return this.outputDir;
   }

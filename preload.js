@@ -34,5 +34,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openPdf: (filePath) => ipcRenderer.invoke('open-pdf', filePath),
 
   // Get output directory path
-  getOutputDir: () => ipcRenderer.invoke('get-output-dir')
+  getOutputDir: () => ipcRenderer.invoke('get-output-dir'),
+
+  // Get conversion history
+  getHistory: () => ipcRenderer.invoke('get-history')
 });

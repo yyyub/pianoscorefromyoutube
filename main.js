@@ -51,10 +51,13 @@ async function initializeApp() {
 app.whenReady().then(async () => {
   await initializeApp();
 
-  // Initialize IPC handlers
-  require('./src/main/ipc-handlers');
+  // Initialize IPC handlers (registers ipcMain handlers in constructor)
+  const ipcHandlers = require('./src/main/ipc-handlers');
 
   await createWindow();
+
+  // Set mainWindow reference for sending events to renderer
+  ipcHandlers.initialize(mainWindow);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

@@ -39,7 +39,7 @@
         <div class="option-group">
           <label class="option-row">
             <input type="checkbox" id="use-separation" checked>
-            보컬 제거 (Demucs AI)
+            음원 분리 (Demucs AI) - 보컬/반주 분리로 품질 향상
           </label>
           <label class="option-row">
             난이도:
@@ -49,6 +49,15 @@
               <option value="advanced">고급 (원곡에 가까움)</option>
             </select>
           </label>
+        </div>
+      </div>
+
+      <div class="history-section" id="history-section">
+        <div class="history-header">
+          <h3>변환 기록</h3>
+        </div>
+        <div class="history-list" id="history-list">
+          <div class="history-empty">변환 기록이 없습니다.</div>
         </div>
       </div>
 
@@ -79,7 +88,10 @@
         <div class="progress-bar-container">
           <div class="progress-bar" id="progress-bar"></div>
         </div>
-        <div class="progress-text" id="progress-text">준비 완료</div>
+        <div class="progress-info">
+          <div class="progress-text" id="progress-text">준비 완료</div>
+          <div class="eta-text" id="eta-text"></div>
+        </div>
       </div>
 
       <div class="log-section">

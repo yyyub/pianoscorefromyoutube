@@ -1,9 +1,11 @@
-Metadata-Version: 2.4
+Metadata-Version: 2.1
 Name: music
 Version: 0.1.0
 Summary: Local music utilities (Demucs stem separation)
-Requires-Python: <3.13,>=3.9
+Requires-Python: <3.12,>=3.11
 Description-Content-Type: text/markdown
+Requires-Dist: torch>=2.2.0
+Requires-Dist: torchaudio>=2.2.0
 Requires-Dist: demucs>=4.0.0
 Requires-Dist: soundfile>=0.12.0
 

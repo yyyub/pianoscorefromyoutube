@@ -1,5 +1,26 @@
 // UI Controller - Manages UI state and updates
 
+let processStartTime = null;
+let lastPercentage = 0;
+
+function formatETA(remainingMs) {
+  if (remainingMs <= 0 || !isFinite(remainingMs)) return '';
+  const totalSec = Math.ceil(remainingMs / 1000);
+  if (totalSec < 60) return `약 ${totalSec}초 남음`;
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `약 ${min}분 ${sec}초 남음`;
+}
+
+function getETA(percentage) {
+  if (!processStartTime || percentage <= 0) return '';
+  const elapsed = Date.now() - processStartTime;
+  if (elapsed < 3000) return ''; // Wait at least 3 seconds for stable estimate
+  const totalEstimate = elapsed / (percentage / 100);
+  const remaining = totalEstimate - elapsed;
+  return formatETA(remaining);
+}
+
 function addLog(message, type = 'info') {
   const logContainer = document.getElementById('log-container');
   const logMessage = document.createElement('div');
@@ -53,6 +74,12 @@ function resetProgress() {
   // Reset progress bar
   updateProgressBar(0);
   updateProgressText('준비 완료');
+  processStartTime = null;
+  lastPercentage = 0;
+
+  // Reset ETA display
+  const etaEl = document.getElementById('eta-text');
+  if (etaEl) etaEl.textContent = '';
 
   // Reset all steps
   for (let i = 1; i <= 4; i++) {
@@ -61,11 +88,22 @@ function resetProgress() {
 }
 
 function updateProgress(step, percentage, message) {
+  // Start timer on first progress
+  if (!processStartTime && percentage > 0) {
+    processStartTime = Date.now();
+  }
+  lastPercentage = percentage;
+
   // Update progress bar
   updateProgressBar(percentage);
 
-  // Update progress text
-  updateProgressText(message);
+  // Update progress text with ETA
+  const eta = getETA(percentage);
+  updateProgressText(eta ? `${message}  |  ${eta}` : message);
+
+  // Update ETA element if exists
+  const etaEl = document.getElementById('eta-text');
+  if (etaEl) etaEl.textContent = eta;
 
   // Update step status
   if (step > 0) {
@@ -83,7 +121,7 @@ function updateProgress(step, percentage, message) {
     }
   }
 
-  // Add log
+  // Add log (without ETA to keep logs clean)
   addLog(message, 'info');
 }
 

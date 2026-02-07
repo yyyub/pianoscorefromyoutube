@@ -15,7 +15,11 @@
       "Bash(node test-basic-pitch.js:*)",
       "Bash(uv:*)",
       "Bash(node setup-gpu.js:*)",
-      "Bash(.venv/Scripts/python.exe:*)"
+      "Bash(.venv/Scripts/python.exe:*)",
+      "Bash(grep:*)",
+      "Bash(\"c:\\\\Users\\\\wjddu\\\\OneDrive\\\\문서\\\\GitHub\\\\pianoscorefromyoutube\\\\.venv\\\\Scripts\\\\python.exe\" --version)",
+      "Bash(powershell -Command:*)",
+      "Bash(del:*)"
     ]
   }
 }

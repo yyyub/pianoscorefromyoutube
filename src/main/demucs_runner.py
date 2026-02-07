@@ -28,7 +28,7 @@ def main() -> int:
         sys.executable,
         "-m",
         "demucs",
-        "--two-stems=vocals",  # vocals와 no_vocals(반주)로 분리
+        # 4-stem 분리: vocals, drums, bass, other
         "-n", args.model,
         "-o", args.output,
         args.input,

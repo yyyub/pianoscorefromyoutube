@@ -1,6 +1,6 @@
 const { parentPort, workerData } = require('worker_threads');
 const { BasicPitch, addPitchBendsToNoteEvents, outputToNotesPoly, noteFramesToTime } = require('@spotify/basic-pitch');
-const { generateFileData } = require('@spotify/basic-pitch/cjs/toMidi');
+const { Midi } = require('@tonejs/midi');
 const tf = require('@tensorflow/tfjs');
 const fs = require('fs-extra');
 const path = require('path');
@@ -76,14 +76,12 @@ async function loadModelFromDisk() {
 async function decodeAudioToFloat32(audioPath) {
   const isInstalled = await audioConverter.checkFfmpegInstalled();
   if (!isInstalled) {
-    throw new Error('FFmpeg is not installed. Please install FFmpeg from https://ffmpeg.org/download.html');
+    throw new Error('FFmpeg is not installed.');
   }
 
   const ffmpegBinary = audioConverter.ffmpegPath || 'ffmpeg';
 
   return new Promise((resolve, reject) => {
-    sendProgress(20, 'Decoding audio for AI...');
-
     const args = [
       '-i', audioPath,
       '-f', 'f32le',
@@ -100,9 +98,7 @@ async function decodeAudioToFloat32(audioPath) {
     let stderr = '';
 
     currentProcess.stdout.on('data', (chunk) => stdoutChunks.push(chunk));
-    currentProcess.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
+    currentProcess.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
 
     currentProcess.on('error', (error) => {
       reject(new Error(`FFmpeg decode error: ${error.message}`));
@@ -110,40 +106,20 @@ async function decodeAudioToFloat32(audioPath) {
 
     currentProcess.on('close', (code) => {
       currentProcess = null;
-
-      if (isCancelled) {
-        reject(new Error('Transcription cancelled'));
-        return;
-      }
-
-      if (code !== 0) {
-        reject(new Error(`FFmpeg decode failed: ${stderr || `exit code ${code}`}`));
-        return;
-      }
+      if (isCancelled) { reject(new Error('Cancelled')); return; }
+      if (code !== 0) { reject(new Error(`FFmpeg decode failed: ${stderr}`)); return; }
 
       const buffer = Buffer.concat(stdoutChunks);
-      if (buffer.length === 0) {
-        reject(new Error('Decoded audio is empty'));
-        return;
-      }
-      if (buffer.length % 4 !== 0) {
-        reject(new Error('Decoded audio has invalid byte length'));
-        return;
-      }
+      if (buffer.length === 0) { reject(new Error('Decoded audio is empty')); return; }
+      if (buffer.length % 4 !== 0) { reject(new Error('Invalid audio byte length')); return; }
 
-      const float32 = new Float32Array(
-        buffer.buffer,
-        buffer.byteOffset,
-        buffer.byteLength / 4
-      );
-
+      const float32 = new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4);
       resolve(float32);
     });
   });
 }
 
 function quantizeTime(time, bpm, subdivision) {
-  // Quantize to nearest subdivision (e.g., 16th note)
   const beatDuration = 60.0 / bpm;
   const stepDuration = beatDuration / subdivision;
   return Math.round(time / stepDuration) * stepDuration;
@@ -152,7 +128,6 @@ function quantizeTime(time, bpm, subdivision) {
 function estimateBPM(notes) {
   if (!notes || notes.length < 4) return 120;
 
-  // Calculate intervals between note onsets
   const sorted = [...notes].sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
   const intervals = [];
   for (let i = 1; i < Math.min(sorted.length, 200); i++) {
@@ -164,12 +139,10 @@ function estimateBPM(notes) {
 
   if (intervals.length === 0) return 120;
 
-  // Find the most common interval (likely the beat)
   intervals.sort((a, b) => a - b);
   const median = intervals[Math.floor(intervals.length / 2)];
   const bpm = Math.round(60.0 / median);
 
-  // Clamp to reasonable range
   if (bpm < 40) return 80;
   if (bpm > 240) return 120;
   return bpm;
@@ -178,7 +151,6 @@ function estimateBPM(notes) {
 function mergeDuplicateNotes(notes) {
   if (!notes || notes.length === 0) return notes;
 
-  // Sort by pitch then start time
   const sorted = [...notes].sort((a, b) => {
     if (a.pitchMidi !== b.pitchMidi) return a.pitchMidi - b.pitchMidi;
     return a.startTimeSeconds - b.startTimeSeconds;
@@ -190,7 +162,6 @@ function mergeDuplicateNotes(notes) {
   for (const note of sorted) {
     if (prev && prev.pitchMidi === note.pitchMidi) {
       const gap = note.startTimeSeconds - (prev.startTimeSeconds + prev.durationSeconds);
-      // Merge if gap is less than 0.05s (notes that are practically continuous)
       if (gap < 0.05) {
         prev.durationSeconds = (note.startTimeSeconds + note.durationSeconds) - prev.startTimeSeconds;
         prev.amplitude = Math.max(prev.amplitude, note.amplitude);
@@ -204,48 +175,42 @@ function mergeDuplicateNotes(notes) {
   return merged;
 }
 
-function applyQualityFilters(notes, mode) {
+function applyQualityFilters(notes, mode, hand, bpm) {
   if (!notes || notes.length === 0) return notes;
 
   let minDuration, minVelocity, maxPolyphony, quantizeSubdivision;
 
-  // Configure based on difficulty level
   if (mode === 'beginner') {
-    // 초급: 매우 쉬운 악보 - 멜로디만, 박자 정렬 강함
-    minDuration = 0.20;
-    minVelocity = 0.35;
-    maxPolyphony = 3;
-    quantizeSubdivision = 2; // 8분음표 단위
+    minDuration = hand === 'left' ? 0.25 : 0.20;
+    minVelocity = hand === 'left' ? 0.25 : 0.30;
+    maxPolyphony = 2;
+    quantizeSubdivision = 2;
   } else if (mode === 'intermediate') {
-    // 중급: 적당한 난이도 - 화음 포함, 박자 정렬 중간
-    minDuration = 0.12;
-    minVelocity = 0.25;
-    maxPolyphony = 5;
-    quantizeSubdivision = 4; // 16분음표 단위
+    minDuration = hand === 'left' ? 0.15 : 0.10;
+    minVelocity = hand === 'left' ? 0.18 : 0.20;
+    maxPolyphony = 3;
+    quantizeSubdivision = 4;
   } else if (mode === 'advanced') {
-    // 고급: 원곡에 가까움 - 복잡한 화음, 박자 정렬 약함
-    minDuration = 0.08;
-    minVelocity = 0.20;
-    maxPolyphony = 8;
-    quantizeSubdivision = 8; // 32분음표 단위
+    minDuration = hand === 'left' ? 0.08 : 0.06;
+    minVelocity = hand === 'left' ? 0.12 : 0.15;
+    maxPolyphony = hand === 'left' ? 4 : 5;
+    quantizeSubdivision = 8;
   } else {
-    // Default to intermediate
-    minDuration = 0.12;
-    minVelocity = 0.25;
-    maxPolyphony = 5;
+    minDuration = hand === 'left' ? 0.15 : 0.10;
+    minVelocity = hand === 'left' ? 0.18 : 0.20;
+    maxPolyphony = 3;
     quantizeSubdivision = 4;
   }
 
-  // Step 1: Remove very short and very quiet notes
+  // Step 1: Remove short and quiet notes
   let filtered = notes.filter(note => (
     note.durationSeconds >= minDuration && note.amplitude >= minVelocity
   ));
 
-  // Step 2: Merge duplicate/overlapping notes
+  // Step 2: Merge overlapping notes
   filtered = mergeDuplicateNotes(filtered);
 
-  // Step 3: Quantize note timing (박자 정렬)
-  const bpm = estimateBPM(filtered);
+  // Step 3: Quantize timing
   filtered = filtered.map(note => {
     const qStart = quantizeTime(note.startTimeSeconds, bpm, quantizeSubdivision);
     const qEnd = quantizeTime(note.startTimeSeconds + note.durationSeconds, bpm, quantizeSubdivision);
@@ -253,7 +218,7 @@ function applyQualityFilters(notes, mode) {
     return { ...note, startTimeSeconds: qStart, durationSeconds: qDuration };
   });
 
-  // Step 4: Limit polyphony (simultaneous notes)
+  // Step 4: Limit polyphony
   filtered.sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
 
   const grouped = [];
@@ -280,83 +245,170 @@ function applyQualityFilters(notes, mode) {
   return reduced;
 }
 
+/**
+ * Transcribe a single audio file using Basic Pitch.
+ */
+async function transcribeAudio(basicPitch, audioPath, qualityMode, progressBase, progressRange, label) {
+  sendProgress(progressBase, `${label}: 오디오 디코딩...`);
+  const audioData = await decodeAudioToFloat32(audioPath);
+
+  if (isCancelled) throw new Error('Cancelled');
+
+  const frames = [];
+  const onsets = [];
+  const contours = [];
+
+  sendProgress(progressBase + 5, `${label}: AI 분석 중...`);
+
+  await basicPitch.evaluateModel(
+    audioData,
+    (f, o, c) => {
+      frames.push(...f);
+      onsets.push(...o);
+      contours.push(...c);
+    },
+    (percent) => {
+      if (isCancelled) return;
+      const scaled = progressBase + 5 + Math.round(percent * (progressRange - 10));
+      sendProgress(scaled, `${label}: AI 분석 ${Math.round(percent * 100)}%`);
+    }
+  );
+
+  if (isCancelled) throw new Error('Cancelled');
+
+  let onsetThresh, frameThresh, minNoteLen;
+  if (qualityMode === 'beginner') {
+    onsetThresh = 0.55; frameThresh = 0.45; minNoteLen = 13;
+  } else if (qualityMode === 'intermediate') {
+    onsetThresh = 0.45; frameThresh = 0.40; minNoteLen = 11;
+  } else if (qualityMode === 'advanced') {
+    onsetThresh = 0.30; frameThresh = 0.30; minNoteLen = 7;
+  } else {
+    onsetThresh = 0.45; frameThresh = 0.40; minNoteLen = 11;
+  }
+
+  const rawNotes = outputToNotesPoly(frames, onsets, onsetThresh, frameThresh, minNoteLen);
+  const notesWithBends = addPitchBendsToNoteEvents(contours, rawNotes);
+  const timedNotes = noteFramesToTime(notesWithBends);
+
+  return timedNotes.filter(note => note.pitchMidi >= 21 && note.pitchMidi <= 108);
+}
+
 async function run() {
   try {
     await fileManager.initialize();
 
-    sendProgress(10, 'Loading audio file...');
-    const audioPath = workerData.audioPath;
+    sendProgress(5, 'AI 모델 로딩...');
     const options = workerData.options || {};
     const outputFilename = fileManager.generateUniqueFilename('.mid');
     const outputPath = fileManager.getTempPath(outputFilename);
 
-    const modelPromise = await loadModelFromDisk();
-    const basicPitch = new BasicPitch(modelPromise);
+    const model = await loadModelFromDisk();
+    const basicPitch = new BasicPitch(model);
 
-    const audioData = await decodeAudioToFloat32(audioPath);
+    let rightHandNotes, leftHandNotes;
 
-    if (isCancelled) {
-      throw new Error('Transcription cancelled');
-    }
+    const hasStemPaths = options.melodyPath && options.accompPath;
 
-    const frames = [];
-    const onsets = [];
-    const contours = [];
+    if (hasStemPaths) {
+      // ====== 2-PASS MODE: Vocals → right hand, Accompaniment → left hand ======
+      sendProgress(10, '보컬(멜로디) 전사 중...');
 
-    sendProgress(30, 'Analyzing audio with AI...');
+      // Pass 1: Transcribe vocals → melody (right hand)
+      const melodyNotes = await transcribeAudio(
+        basicPitch, options.melodyPath, options.qualityMode,
+        10, 40, '멜로디'
+      );
 
-    await basicPitch.evaluateModel(
-      audioData,
-      (f, o, c) => {
-        frames.push(...f);
-        onsets.push(...o);
-        contours.push(...c);
-      },
-      (percent) => {
-        if (isCancelled) {
-          return;
-        }
-        const scaled = 30 + Math.round(percent * 50);
-        sendProgress(scaled, `Analyzing audio with AI: ${Math.round(percent * 100)}%`);
+      if (isCancelled) throw new Error('Cancelled');
+
+      // Check if vocal stem has enough notes (fallback for instrumental songs)
+      if (melodyNotes.length < 10) {
+        console.log(`Vocal stem has only ${melodyNotes.length} notes — falling back to pitch-based split`);
+        const allNotes = await transcribeAudio(
+          basicPitch, options.accompPath, options.qualityMode,
+          50, 40, '전체 전사'
+        );
+        rightHandNotes = allNotes.filter(n => n.pitchMidi >= 60);
+        leftHandNotes = allNotes.filter(n => n.pitchMidi < 60);
+      } else {
+        // Pass 2: Transcribe accompaniment → left hand
+        sendProgress(50, '반주(베이스+기타) 전사 중...');
+        const accompNotes = await transcribeAudio(
+          basicPitch, options.accompPath, options.qualityMode,
+          50, 40, '반주'
+        );
+
+        // Right hand: melody notes (vocals, keep notes >= 48 = C3)
+        rightHandNotes = melodyNotes.filter(n => n.pitchMidi >= 48);
+
+        // Left hand: accompaniment notes (keep notes < 72 = C5 to avoid overlap with melody)
+        leftHandNotes = accompNotes.filter(n => n.pitchMidi < 72);
       }
-    );
-
-    if (isCancelled) {
-      throw new Error('Transcription cancelled');
-    }
-
-    sendProgress(85, 'Generating MIDI...');
-
-    // Adjust thresholds based on difficulty
-    let onsetThresh, frameThresh, minNoteLen;
-    if (options.qualityMode === 'beginner') {
-      onsetThresh = 0.6;  // Very strict - only clear notes
-      frameThresh = 0.5;
-      minNoteLen = 13;
-    } else if (options.qualityMode === 'intermediate') {
-      onsetThresh = 0.5;  // Moderate
-      frameThresh = 0.45;
-      minNoteLen = 11;
-    } else if (options.qualityMode === 'advanced') {
-      onsetThresh = 0.35; // More permissive
-      frameThresh = 0.35;
-      minNoteLen = 7;
     } else {
-      // Default to intermediate
-      onsetThresh = 0.5;
-      frameThresh = 0.45;
-      minNoteLen = 11;
+      // ====== SINGLE-PASS MODE: Split by pitch (no separation) ======
+      const audioPath = workerData.audioPath;
+      sendProgress(10, 'AI 전사 중...');
+
+      const allNotes = await transcribeAudio(
+        basicPitch, audioPath, options.qualityMode,
+        10, 80, '전사'
+      );
+
+      rightHandNotes = allNotes.filter(n => n.pitchMidi >= 60);
+      leftHandNotes = allNotes.filter(n => n.pitchMidi < 60);
     }
 
-    const rawNotes = outputToNotesPoly(frames, onsets, onsetThresh, frameThresh, minNoteLen);
-    const notesWithBends = addPitchBendsToNoteEvents(contours, rawNotes);
-    const timedNotes = noteFramesToTime(notesWithBends);
-    const pianoNotes = timedNotes.filter(note => note.pitchMidi >= 21 && note.pitchMidi <= 108);
-    const finalNotes = applyQualityFilters(pianoNotes, options.qualityMode);
-    const midiData = generateFileData(finalNotes);
+    if (isCancelled) throw new Error('Cancelled');
 
-    await fs.writeFile(outputPath, Buffer.from(midiData));
-    sendProgress(100, 'Transcription complete');
+    sendProgress(92, 'MIDI 생성 중...');
+
+    // Estimate BPM from all notes combined
+    const allNotes = [...(rightHandNotes || []), ...(leftHandNotes || [])];
+    const bpm = estimateBPM(allNotes);
+
+    // Apply quality filters per hand
+    const filteredRight = applyQualityFilters(rightHandNotes, options.qualityMode, 'right', bpm);
+    const filteredLeft = applyQualityFilters(leftHandNotes, options.qualityMode, 'left', bpm);
+
+    console.log(`BPM: ${bpm}, Right hand: ${filteredRight.length} notes, Left hand: ${filteredLeft.length} notes`);
+
+    // Create 2-track MIDI
+    const midi = new Midi();
+    midi.header.setTempo(bpm);
+
+    const rightTrack = midi.addTrack();
+    rightTrack.name = 'Right Hand';
+    rightTrack.channel = 0;
+    rightTrack.instrument.number = 0;
+
+    filteredRight.forEach(note => {
+      rightTrack.addNote({
+        midi: note.pitchMidi,
+        time: note.startTimeSeconds,
+        duration: note.durationSeconds,
+        velocity: note.amplitude,
+      });
+    });
+
+    const leftTrack = midi.addTrack();
+    leftTrack.name = 'Left Hand';
+    leftTrack.channel = 1;
+    leftTrack.instrument.number = 0;
+
+    filteredLeft.forEach(note => {
+      leftTrack.addNote({
+        midi: note.pitchMidi,
+        time: note.startTimeSeconds,
+        duration: note.durationSeconds,
+        velocity: note.amplitude,
+      });
+    });
+
+    const midiData = Buffer.from(midi.toArray());
+
+    await fs.writeFile(outputPath, midiData);
+    sendProgress(100, '전사 완료');
 
     sendResult({
       filePath: outputPath,
