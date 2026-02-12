@@ -208,7 +208,6 @@ class RhythmGameUI {
     const fileUrl = window.electronAPI.pathToFileURL(videoPath);
     this._bgVideo.src = fileUrl;
     this._bgVideo.load();
-    this._bgVideo.style.display = 'block';
   }
 
   _playBgVideo() {
@@ -232,7 +231,8 @@ class RhythmGameUI {
     this._bgVideo.pause();
     this._bgVideo.removeAttribute('src');
     this._bgVideo.load();
-    this._bgVideo.style.display = 'none';
+    const playingEl = document.getElementById('game-playing');
+    if (playingEl) playingEl.classList.remove('has-video');
   }
 
   // ─── Piano Song List ───────────────────────────
@@ -439,37 +439,20 @@ class RhythmGameUI {
       return;
     }
 
-    // Background video
+    // Background video: side-by-side layout (notes left, video right)
+    const playingEl = document.getElementById('game-playing');
     if (this.currentVideoPath) {
+      playingEl.classList.add('has-video');
       this._loadBgVideo(this.currentVideoPath);
     } else {
+      playingEl.classList.remove('has-video');
       this._stopBgVideo();
     }
 
-    // HUD callbacks
+    // HUD callbacks (combo is drawn on canvas, score + judgment on HTML HUD)
     this.game.onScoreUpdate = (score, combo, judgment) => {
       hudScore.textContent = score.toLocaleString();
-
-      if (combo > 0) {
-        hudCombo.textContent = combo + ' COMBO';
-        hudCombo.style.display = 'block';
-        hudCombo.classList.remove('combo-pop');
-        void hudCombo.offsetWidth;
-        hudCombo.classList.add('combo-pop');
-      } else {
-        hudCombo.style.display = 'none';
-      }
-
-      const colors = { perfect: '#FFD700', great: '#00FF88', good: '#4D96FF', miss: '#FF4444' };
-      const labels = { perfect: 'PERFECT', great: 'GREAT', good: 'GOOD', miss: 'MISS' };
-      hudJudgment.textContent = labels[judgment];
-      hudJudgment.style.color = colors[judgment];
-      hudJudgment.style.display = 'block';
-      hudJudgment.classList.remove('judgment-pop');
-      void hudJudgment.offsetWidth;
-      hudJudgment.classList.add('judgment-pop');
-      clearTimeout(this._judgmentTimeout);
-      this._judgmentTimeout = setTimeout(() => { hudJudgment.style.display = 'none'; }, 500);
+      // Combo is rendered on canvas with effects — no HTML HUD for combo
     };
 
     // Pause callback

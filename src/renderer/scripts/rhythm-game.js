@@ -57,6 +57,8 @@ class RhythmGame {
     // Effects
     this.judgmentEffects = [];
     this.hitEffects = [];
+    this.comboAnimTime = 0;       // timestamp of last combo change (for pop animation)
+    this.comboBurstEffects = [];  // big burst effects (long note complete, milestones)
 
     // Game mode: 'piano' (synth sounds) or 'vocal' (vocal gating)
     this.gameMode = 'piano';
@@ -363,6 +365,8 @@ class RhythmGame {
     this.judgments = { perfect: 0, great: 0, good: 0, miss: 0 };
     this.judgmentEffects = [];
     this.hitEffects = [];
+    this.comboBurstEffects = [];
+    this.comboAnimTime = 0;
     this.currentTime = 0;
     this._vocalGateEndTimes = [];
 
@@ -517,7 +521,7 @@ class RhythmGame {
   }
 
   _updateLongNotes() {
-    // Award bonus points for held long notes every 0.2s
+    const now = performance.now();
     for (const note of this.notes) {
       if (!this.longNoteHeld[note.id]) continue;
 
@@ -525,30 +529,50 @@ class RhythmGame {
 
       // Check if key is still held
       if (!this.keyStates[note.lane]) {
-        // Released early — end long note
+        // Released early — end long note, break combo
         delete this.longNoteHeld[note.id];
         this.processedNotes.add(note.id);
+        this.combo = 0;
+        this.comboAnimTime = now;
+        if (this.onScoreUpdate) this.onScoreUpdate(this.score, this.combo, 'miss');
         continue;
       }
 
-      // Check if long note duration ended
+      // Check if long note duration ended (end cap reached hit line)
       if (this.currentTime >= endTime) {
         delete this.longNoteHeld[note.id];
         this.processedNotes.add(note.id);
-        // Final bonus
-        this.score += 50;
+        // Completion bonus: big score + combo + burst effect
+        this.combo++;
+        this.maxCombo = Math.max(this.maxCombo, this.combo);
+        const comboMult = 1 + Math.floor(this.combo / 10) * 0.1;
+        this.score += Math.round(100 * comboMult);
+        this.comboAnimTime = now;
+        this.hitEffects.push({ lane: note.lane, time: now });
+        this.comboBurstEffects.push({ lane: note.lane, time: now });
+        this.judgmentEffects.push({ judgment: 'perfect', lane: note.lane, time: now });
+        if (this.onScoreUpdate) this.onScoreUpdate(this.score, this.combo, 'perfect');
         continue;
       }
 
-      // Award tick points every 200ms of holding
-      const ticks = Math.floor((this.currentTime - note.time) / 0.2);
+      // Award tick points + combo every 150ms of holding
+      const ticks = Math.floor((this.currentTime - note.time) / 0.15);
       const scored = this.longNoteScored[note.id] || 0;
       if (ticks > scored) {
-        this.score += 20 * (ticks - scored);
-        this.longNoteScored[note.id] = ticks;
-        if (this.onScoreUpdate) {
-          this.onScoreUpdate(this.score, this.combo, 'perfect');
+        const newTicks = ticks - scored;
+        for (let t = 0; t < newTicks; t++) {
+          this.combo++;
+          this.maxCombo = Math.max(this.maxCombo, this.combo);
         }
+        const comboMult = 1 + Math.floor(this.combo / 10) * 0.1;
+        this.score += Math.round(15 * newTicks * comboMult);
+        this.longNoteScored[note.id] = ticks;
+        this.comboAnimTime = now;
+        // Fire hit effect ring on every other tick to avoid clutter
+        if (ticks % 2 === 0) {
+          this.hitEffects.push({ lane: note.lane, time: now });
+        }
+        if (this.onScoreUpdate) this.onScoreUpdate(this.score, this.combo, 'perfect');
       }
     }
   }
@@ -557,6 +581,7 @@ class RhythmGame {
     const now = performance.now();
     this.judgmentEffects = this.judgmentEffects.filter(e => now - e.time < 600);
     this.hitEffects = this.hitEffects.filter(e => now - e.time < 300);
+    this.comboBurstEffects = this.comboBurstEffects.filter(e => now - e.time < 800);
   }
 
   // ─── Input ────────────────────────────────────────────
@@ -644,19 +669,25 @@ class RhythmGame {
 
   _applyJudgment(judgment, lane) {
     const points = { perfect: 300, great: 200, good: 100, miss: 0 };
+    const now = performance.now();
 
     if (judgment === 'miss') {
       this.combo = 0;
     } else {
       this.combo++;
       this.maxCombo = Math.max(this.maxCombo, this.combo);
+      // Milestone burst at 50, 100, 200, 500, 1000
+      if ([50, 100, 200, 500, 1000].includes(this.combo)) {
+        this.comboBurstEffects.push({ lane, time: now, milestone: true });
+      }
     }
 
+    this.comboAnimTime = now;
     const comboMultiplier = 1 + Math.floor(this.combo / 10) * 0.1;
     this.score += Math.round(points[judgment] * comboMultiplier);
     this.judgments[judgment]++;
 
-    this.judgmentEffects.push({ judgment, lane, time: performance.now() });
+    this.judgmentEffects.push({ judgment, lane, time: now });
 
     if (this.onScoreUpdate) {
       this.onScoreUpdate(this.score, this.combo, judgment);
@@ -689,8 +720,8 @@ class RhythmGame {
     const w = this.displayWidth;
     const h = this.displayHeight;
 
-    // Background (semi-transparent for video to show through)
-    ctx.fillStyle = 'rgba(10,10,26,0.85)';
+    // Background (opaque — video is displayed beside the canvas, not behind it)
+    ctx.fillStyle = '#0a0a1a';
     ctx.fillRect(0, 0, w, h);
 
     // Lane backgrounds
@@ -729,9 +760,11 @@ class RhythmGame {
     }
 
     this._drawHitEffects(ctx);
+    this._drawComboBursts(ctx);
     this._drawJudgmentEffects(ctx);
 
     if (this.gameState === 'playing' || this.gameState === 'paused') {
+      this._drawCombo(ctx, w);
       this._drawProgressBar(ctx, w);
     }
 
@@ -954,6 +987,92 @@ class RhythmGame {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(texts[effect.judgment], x, y);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  _drawCombo(ctx, w) {
+    if (this.combo < 2) return;
+
+    const now = performance.now();
+    const age = Math.min(1, (now - this.comboAnimTime) / 200); // 200ms pop animation
+    const popScale = age < 0.5 ? 1 + (1 - age * 2) * 0.3 : 1; // scale from 1.3 to 1.0
+
+    // Combo color based on milestone
+    let comboColor;
+    if (this.combo >= 1000) comboColor = '#FF2D2D';
+    else if (this.combo >= 500) comboColor = '#FF6B6B';
+    else if (this.combo >= 200) comboColor = '#FFD700';
+    else if (this.combo >= 100) comboColor = '#FF9F43';
+    else if (this.combo >= 50) comboColor = '#00FF88';
+    else if (this.combo >= 25) comboColor = '#6BCB77';
+    else if (this.combo >= 10) comboColor = '#4D96FF';
+    else comboColor = 'rgba(255,255,255,0.8)';
+
+    const cx = w - 70;
+    const cy = 60;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(popScale, popScale);
+
+    // Combo number
+    const fontSize = this.combo >= 100 ? 36 : 42;
+    ctx.font = `bold ${fontSize}px "Segoe UI", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Shadow/glow
+    ctx.shadowColor = comboColor;
+    ctx.shadowBlur = this.combo >= 50 ? 15 : 8;
+    ctx.fillStyle = comboColor;
+    ctx.fillText(String(this.combo), 0, 0);
+    ctx.shadowBlur = 0;
+
+    // "COMBO" label
+    ctx.font = 'bold 11px "Segoe UI", sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillText('COMBO', 0, 24);
+
+    ctx.restore();
+  }
+
+  _drawComboBursts(ctx) {
+    const now = performance.now();
+    for (const burst of this.comboBurstEffects) {
+      const age = (now - burst.time) / 800;
+      if (age >= 1) continue;
+
+      const x = this._getLaneX(burst.lane);
+      const color = this.laneColors[burst.lane];
+
+      // Multi-ring burst
+      for (let i = 0; i < 3; i++) {
+        const ringAge = Math.max(0, age - i * 0.1);
+        if (ringAge >= 1) continue;
+        const radius = 30 + ringAge * 80;
+        ctx.globalAlpha = (1 - ringAge) * 0.5;
+        ctx.strokeStyle = burst.milestone ? '#FFD700' : color;
+        ctx.lineWidth = (3 - i) * (1 - ringAge);
+        ctx.beginPath();
+        ctx.arc(x, this.hitLineY, radius, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      // Sparkle particles
+      if (burst.milestone) {
+        for (let i = 0; i < 8; i++) {
+          const angle = (Math.PI * 2 / 8) * i + age * 2;
+          const dist = 20 + age * 60;
+          const px = x + Math.cos(angle) * dist;
+          const py = this.hitLineY + Math.sin(angle) * dist;
+          ctx.globalAlpha = (1 - age) * 0.8;
+          ctx.fillStyle = '#FFD700';
+          ctx.beginPath();
+          ctx.arc(px, py, 3 * (1 - age), 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
       ctx.globalAlpha = 1;
     }
   }

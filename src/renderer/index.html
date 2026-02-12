@@ -238,18 +238,20 @@
 
     <!-- Game Playing View -->
     <div id="game-playing" class="game-view">
+      <div id="game-play-area" class="game-play-area">
+        <canvas id="game-canvas"></canvas>
+        <div id="game-hud" class="game-hud">
+          <div class="hud-score" id="hud-score">0</div>
+          <div class="hud-combo" id="hud-combo"></div>
+          <div class="hud-judgment" id="hud-judgment"></div>
+        </div>
+        <div id="game-pause-overlay" class="game-pause-overlay">
+          <h2>PAUSED</h2>
+          <button id="game-resume-btn" class="game-btn game-btn-primary">Resume</button>
+          <button id="game-quit-btn" class="game-btn game-btn-secondary">Quit</button>
+        </div>
+      </div>
       <video id="game-bg-video" class="game-bg-video" muted playsinline></video>
-      <canvas id="game-canvas"></canvas>
-      <div id="game-hud" class="game-hud">
-        <div class="hud-score" id="hud-score">0</div>
-        <div class="hud-combo" id="hud-combo"></div>
-        <div class="hud-judgment" id="hud-judgment"></div>
-      </div>
-      <div id="game-pause-overlay" class="game-pause-overlay">
-        <h2>PAUSED</h2>
-        <button id="game-resume-btn" class="game-btn game-btn-primary">Resume</button>
-        <button id="game-quit-btn" class="game-btn game-btn-secondary">Quit</button>
-      </div>
     </div>
 
     <!-- Results View -->

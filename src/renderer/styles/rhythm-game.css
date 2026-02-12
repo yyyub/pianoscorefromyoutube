@@ -351,22 +351,39 @@
 
 #game-playing {
   position: relative;
+  flex-direction: row !important;
   align-items: stretch;
   overflow: hidden;
 }
 
-/* Background video */
+/* Play area: holds canvas + HUD + pause */
+.game-play-area {
+  position: relative;
+  flex: 1;
+  height: 100%;
+  min-width: 0;
+}
+
+/* When video is present, notes take 60% */
+#game-playing.has-video .game-play-area {
+  flex: 0 0 60%;
+}
+
+/* Video panel: right side, visible */
 .game-bg-video {
   display: none;
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
+  width: 0;
   height: 100%;
   object-fit: cover;
-  opacity: 0.25;
-  z-index: 0;
+  background: #000;
   pointer-events: none;
+}
+
+#game-playing.has-video .game-bg-video {
+  display: block;
+  flex: 0 0 40%;
+  width: 40%;
+  opacity: 1;
 }
 
 #game-canvas {
@@ -456,7 +473,7 @@
   100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
 }
 
-/* Pause overlay */
+/* Pause overlay — covers only the game play area, not the video */
 .game-pause-overlay {
   display: none;
   position: absolute;
