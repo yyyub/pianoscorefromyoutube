@@ -7,6 +7,9 @@ dist/
 build/
 out/
 
+# Python virtual environment
+.venv/
+
 # Temporary files
 temp/*
 !temp/.gitkeep
@@ -14,6 +17,10 @@ temp/*
 # Output files
 output/*
 !output/.gitkeep
+
+# Cache
+cache/*
+!cache/.gitkeep
 
 # Logs
 *.log

@@ -91,6 +91,40 @@ class StemSeparator {
   }
 
   /**
+   * Mix drums + bass + other into a single instrumental file (vocals excluded).
+   * Used for vocal rhythm game mode BGM.
+   */
+  async mixInstrumental(drumsPath, bassPath, otherPath, outputPath) {
+    const ffmpegBin = await this.getFfmpegBinary();
+
+    return new Promise((resolve, reject) => {
+      const args = [
+        '-y',
+        '-i', drumsPath,
+        '-i', bassPath,
+        '-i', otherPath,
+        '-filter_complex', '[0:a][1:a][2:a]amix=inputs=3:duration=longest',
+        '-ac', '2',
+        '-ar', '44100',
+        '-b:a', '192k',
+        outputPath
+      ];
+
+      const proc = spawn(ffmpegBin, args, { windowsHide: true });
+      let stderr = '';
+      proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+      proc.on('error', (err) => reject(new Error(`FFmpeg instrumental mix error: ${err.message}`)));
+      proc.on('close', (code) => {
+        if (code !== 0) {
+          reject(new Error(`FFmpeg instrumental mix failed (code ${code}): ${stderr}`));
+        } else {
+          resolve(outputPath);
+        }
+      });
+    });
+  }
+
+  /**
    * Separate audio into vocals (melody) and accompaniment (bass + other).
    * Uses full 4-stem Demucs: vocals, drums, bass, other.
    * Returns { melodyPath, accompPath, cleanupDir }.
@@ -211,11 +245,13 @@ class StemSeparator {
     const stemDir = path.join(outputDir, 'htdemucs', baseName);
 
     const vocalsPath = path.join(stemDir, 'vocals.wav');
+    const drumsPath = path.join(stemDir, 'drums.wav');
     const bassPath = path.join(stemDir, 'bass.wav');
     const otherPath = path.join(stemDir, 'other.wav');
 
-    const [vocalsExists, bassExists, otherExists] = await Promise.all([
+    const [vocalsExists, drumsExists, bassExists, otherExists] = await Promise.all([
       fileManager.fileExists(vocalsPath),
+      fileManager.fileExists(drumsPath),
       fileManager.fileExists(bassPath),
       fileManager.fileExists(otherPath)
     ]);
@@ -224,13 +260,23 @@ class StemSeparator {
       throw new Error('Demucs 4-stem output not found. Please confirm Demucs is installed.');
     }
 
-    // Mix bass + other → accompaniment
+    // Mix bass + other → accompaniment (for piano transcription)
     if (progressCallback) {
-      progressCallback(95, '반주 트랙 합성 중...');
+      progressCallback(93, '반주 트랙 합성 중...');
     }
 
     const accompPath = path.join(stemDir, 'accomp.wav');
     await this.mixStemsToAccompaniment(bassPath, otherPath, accompPath);
+
+    // Mix drums + bass + other → instrumental (for vocal rhythm game BGM)
+    let instrumentalPath = null;
+    if (drumsExists) {
+      if (progressCallback) {
+        progressCallback(96, '인스트루멘탈 합성 중...');
+      }
+      instrumentalPath = path.join(stemDir, 'instrumental.mp3');
+      await this.mixInstrumental(drumsPath, bassPath, otherPath, instrumentalPath);
+    }
 
     if (progressCallback) {
       progressCallback(100, '음원 분리 완료');
@@ -239,6 +285,8 @@ class StemSeparator {
     return {
       melodyPath: vocalsPath,
       accompPath: accompPath,
+      drumsPath: drumsExists ? drumsPath : null,
+      instrumentalPath: instrumentalPath,
       cleanupDir: outputDir
     };
   }

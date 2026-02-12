@@ -19,7 +19,18 @@
       "Bash(grep:*)",
       "Bash(\"c:\\\\Users\\\\wjddu\\\\OneDrive\\\\문서\\\\GitHub\\\\pianoscorefromyoutube\\\\.venv\\\\Scripts\\\\python.exe\" --version)",
       "Bash(powershell -Command:*)",
-      "Bash(del:*)"
+      "Bash(del:*)",
+      "Bash(npx electron:*)",
+      "Bash(node --check:*)",
+      "Bash(where:*)",
+      "Bash(\"d:\\\\pianoscorefromyoutube\\\\.venv\\\\Scripts\\\\python.exe\" --version)",
+      "Bash(d:\\\\pianoscorefromyoutube\\\\.venv\\\\Scripts\\\\python.exe -m pip install:*)",
+      "Bash(cmd /c \"d:\\\\pianoscorefromyoutube\\\\.venv\\\\Scripts\\\\python.exe -m pip install soundfile\")",
+      "Bash(cmd /c \"d:\\\\pianoscorefromyoutube\\\\.venv\\\\Scripts\\\\pip.exe install soundfile\")",
+      "Bash(cmd /c \"cd /d d:\\\\pianoscorefromyoutube && uv pip install soundfile --python .venv\\\\Scripts\\\\python.exe\")",
+      "Bash(cmd.exe /c \"cd /d d:\\\\pianoscorefromyoutube && uv pip install soundfile --python .venv\\\\Scripts\\\\python.exe && echo DONE\")",
+      "Bash(powershell.exe -Command \"cd d:\\\\pianoscorefromyoutube; uv pip install soundfile --python .venv\\\\Scripts\\\\python.exe\")",
+      "Bash(powershell.exe -Command:*)"
     ]
   }
 }

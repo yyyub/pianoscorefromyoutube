@@ -1,0 +1,654 @@
+/* ─── Rhythm Game Overlay ─────────────────────────── */
+
+.rhythm-game-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: #0a0a1a;
+  z-index: 9999;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #fff;
+  overflow: hidden;
+}
+
+.game-view {
+  display: none;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+
+/* ─── Song Selection ─────────────────────────────── */
+
+#game-song-select {
+  align-items: center;
+  padding: 40px;
+  overflow-y: auto;
+  background: linear-gradient(180deg, #0a0a1a 0%, #0f1428 50%, #0a0a1a 100%);
+}
+
+/* ─── Mode Tabs ──────────────────────────────────── */
+
+.mode-tabs {
+  display: flex;
+  gap: 0;
+  width: 100%;
+  max-width: 700px;
+  margin-bottom: 20px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+.mode-tab {
+  flex: 1;
+  padding: 12px 20px;
+  border: none;
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.5);
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 0.5px;
+}
+
+.mode-tab:hover {
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.7);
+}
+
+.mode-tab.active {
+  background: linear-gradient(135deg, rgba(77,150,255,0.2), rgba(107,203,119,0.2));
+  color: #fff;
+}
+
+#mode-tab-vocal.active {
+  background: linear-gradient(135deg, rgba(255,107,157,0.2), rgba(255,150,50,0.2));
+}
+
+/* ─── Song Panel ─────────────────────────────────── */
+
+.song-panel {
+  width: 100%;
+  max-width: 700px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ─── Vocal Mode UI ──────────────────────────────── */
+
+.vocal-url-section {
+  width: 100%;
+  margin-bottom: 16px;
+}
+
+.vocal-url-row {
+  display: flex;
+  gap: 10px;
+}
+
+.vocal-url-input {
+  flex: 1;
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.vocal-url-input:focus {
+  border-color: rgba(255,107,157,0.5);
+}
+
+.vocal-url-input::placeholder {
+  color: rgba(255,255,255,0.3);
+}
+
+.vocal-analyze-btn {
+  white-space: nowrap;
+  padding: 12px 24px !important;
+  min-width: auto !important;
+  background: linear-gradient(135deg, #FF6B9D, #FF9650) !important;
+}
+
+.vocal-progress {
+  margin-top: 12px;
+}
+
+.vocal-progress-bar-bg {
+  width: 100%;
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.vocal-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #FF6B9D, #FF9650);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+  width: 0%;
+}
+
+.vocal-progress-text {
+  font-size: 0.8rem;
+  color: rgba(255,255,255,0.5);
+  margin-top: 6px;
+  text-align: center;
+}
+
+.vocal-list-header {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.3);
+  padding: 8px 0;
+  letter-spacing: 0.5px;
+}
+
+.diff-vocal {
+  background: rgba(255,107,157,0.15);
+  color: #FF6B9D;
+}
+
+.game-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  max-width: 700px;
+  margin-bottom: 24px;
+}
+
+.game-header h2 {
+  font-size: 2rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, #4D96FF, #6BCB77, #FFD93D);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: -0.5px;
+}
+
+#game-close-btn {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.6);
+  font-size: 1.1rem;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+#game-close-btn:hover {
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+}
+
+/* Settings controls */
+.game-settings {
+  display: flex;
+  gap: 20px;
+  width: 100%;
+  max-width: 700px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  padding: 16px 20px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.setting-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.6);
+}
+
+.setting-item label {
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.setting-item input[type="range"] {
+  width: 110px;
+  accent-color: #4D96FF;
+  height: 4px;
+}
+
+.setting-item select {
+  background: rgba(255,255,255,0.08);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.setting-item select option {
+  background: #1a1a2e;
+  color: #fff;
+}
+
+.setting-value {
+  min-width: 45px;
+  text-align: right;
+  font-weight: 600;
+  color: #4D96FF;
+  font-size: 0.85rem;
+}
+
+/* Song list */
+.song-list {
+  width: 100%;
+  max-width: 700px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.song-loading, .song-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: rgba(255,255,255,0.3);
+  font-size: 0.95rem;
+  line-height: 1.8;
+}
+
+.song-group {
+  margin-bottom: 12px;
+}
+
+.song-group-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.3);
+  padding: 10px 16px 6px;
+  letter-spacing: 0.5px;
+}
+
+.song-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  margin: 2px 0;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: 1px solid transparent;
+}
+
+.song-item:hover {
+  background: rgba(77,150,255,0.08);
+  border-color: rgba(77,150,255,0.15);
+}
+
+.song-item:active {
+  background: rgba(77,150,255,0.12);
+  transform: scale(0.99);
+}
+
+.song-difficulty {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+}
+
+.diff-easy {
+  background: rgba(107,203,119,0.15);
+  color: #6BCB77;
+}
+
+.diff-medium {
+  background: rgba(255,217,61,0.15);
+  color: #FFD93D;
+}
+
+.diff-hard {
+  background: rgba(255,107,107,0.15);
+  color: #FF6B6B;
+}
+
+.song-name {
+  flex: 1;
+  font-size: 0.9rem;
+  color: rgba(255,255,255,0.85);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.song-video-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(77,150,255,0.2);
+  color: #4D96FF;
+  letter-spacing: 0.5px;
+}
+
+/* ─── Game Playing ───────────────────────────────── */
+
+#game-playing {
+  position: relative;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+/* Background video */
+.game-bg-video {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.25;
+  z-index: 0;
+  pointer-events: none;
+}
+
+#game-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+/* HUD */
+.game-hud {
+  position: absolute;
+  top: 16px;
+  right: 24px;
+  text-align: right;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.hud-score {
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 2px 12px rgba(0,0,0,0.6);
+  letter-spacing: -0.5px;
+}
+
+.hud-combo {
+  display: none;
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: #FFD93D;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.6);
+}
+
+.hud-combo.combo-pop {
+  animation: combo-pop 0.15s ease-out;
+}
+
+.hud-judgment {
+  display: none;
+  font-size: 1.2rem;
+  font-weight: 800;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.6);
+  margin-top: 4px;
+}
+
+.hud-judgment.judgment-pop {
+  animation: judgment-pop 0.2s ease-out;
+}
+
+@keyframes combo-pop {
+  0% { transform: scale(1.4); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes judgment-pop {
+  0% { transform: scale(1.5) translateY(-5px); opacity: 0.7; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+/* Speed indicator toast */
+.speed-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0,0,0,0.7);
+  color: #4D96FF;
+  font-size: 1.2rem;
+  font-weight: 700;
+  padding: 10px 24px;
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 15;
+  opacity: 0;
+  transition: none;
+}
+
+.speed-indicator.speed-fade {
+  animation: speed-toast 1s ease-out forwards;
+}
+
+@keyframes speed-toast {
+  0% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+}
+
+/* Pause overlay */
+.game-pause-overlay {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(4px);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  z-index: 20;
+}
+
+.game-pause-overlay h2 {
+  font-size: 3rem;
+  font-weight: 800;
+  color: #fff;
+  margin-bottom: 16px;
+  letter-spacing: 2px;
+}
+
+.game-btn {
+  padding: 14px 36px;
+  border: none;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+  min-width: 170px;
+  letter-spacing: 0.3px;
+}
+
+.game-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+}
+
+.game-btn:active {
+  transform: translateY(0);
+}
+
+.game-btn-primary {
+  background: linear-gradient(135deg, #4D96FF, #6BCB77);
+  color: #fff;
+}
+
+.game-btn-secondary {
+  background: rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.8);
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+/* ─── Results ────────────────────────────────────── */
+
+#game-results {
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #0a0a1a 0%, #12122e 50%, #0a0a1a 100%);
+}
+
+.results-card {
+  text-align: center;
+  padding: 48px 40px;
+  max-width: 450px;
+  width: 90%;
+  background: rgba(255,255,255,0.03);
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.results-card h2 {
+  font-size: 1.1rem;
+  color: rgba(255,255,255,0.4);
+  margin-bottom: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.results-grade {
+  font-size: 6rem;
+  font-weight: 900;
+  line-height: 1;
+  margin-bottom: 8px;
+  text-shadow: 0 0 40px currentColor;
+}
+
+.results-score {
+  font-size: 2.4rem;
+  font-weight: 800;
+  color: #fff;
+  margin-bottom: 4px;
+}
+
+.results-accuracy {
+  font-size: 1rem;
+  color: rgba(255,255,255,0.4);
+  margin-bottom: 28px;
+}
+
+.results-detail {
+  margin-bottom: 16px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 10px;
+  padding: 8px 0;
+}
+
+.results-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 24px;
+  font-size: 0.95rem;
+}
+
+.results-label {
+  font-weight: 700;
+}
+
+.results-count {
+  font-weight: 800;
+  color: #fff;
+}
+
+.results-combo {
+  font-size: 0.9rem;
+  color: rgba(255,255,255,0.4);
+  margin-bottom: 4px;
+}
+
+.results-total {
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.3);
+  margin-bottom: 4px;
+}
+
+.results-difficulty {
+  font-size: 0.85rem;
+  color: #4D96FF;
+  font-weight: 600;
+  margin-bottom: 28px;
+}
+
+.results-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+/* ─── Scrollbar ──────────────────────────────────── */
+
+.song-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.song-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.song-list::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+}
+
+.song-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.2);
+}
+
+/* ─── Responsive ─────────────────────────────────── */
+
+@media (max-width: 600px) {
+  #game-song-select {
+    padding: 20px;
+  }
+
+  .game-settings {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .hud-score {
+    font-size: 1.6rem;
+  }
+
+  .results-grade {
+    font-size: 4rem;
+  }
+
+  .results-score {
+    font-size: 1.8rem;
+  }
+}

@@ -3,9 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' file:;">
   <title>YouTube to Piano Sheet Music</title>
   <link rel="stylesheet" href="styles/main.css">
+  <link rel="stylesheet" href="styles/rhythm-game.css">
 </head>
 <body>
   <div class="container">
@@ -150,14 +151,20 @@
         <div class="result-card">
           <h3>✅ 변환 완료!</h3>
           <p id="result-message">MIDI 파일이 생성되었습니다.</p>
-          <button id="open-pdf-btn" class="btn btn-primary">MIDI 열기</button>
-          <button id="open-folder-btn" class="btn btn-secondary">폴더 열기</button>
+          <div class="button-group">
+            <button id="open-pdf-btn" class="btn btn-primary">MIDI 열기</button>
+            <button id="open-folder-btn" class="btn btn-secondary">폴더 열기</button>
+          </div>
+          <div class="button-group" style="margin-top:10px">
+            <button id="rhythm-game-result-btn" class="btn btn-primary" style="background:linear-gradient(135deg,#4D96FF,#6BCB77)">리듬게임</button>
+          </div>
         </div>
       </div>
     </main>
 
     <footer>
       <p>
+        <a href="#" id="rhythm-game-btn" style="font-weight:600;">리듬게임</a> |
         FFmpeg 설치 필요 |
         <a href="#" id="help-link">도움말</a> |
         <a href="#" id="about-link">정보</a>
@@ -165,8 +172,103 @@
     </footer>
   </div>
 
+  <!-- Rhythm Game Overlay -->
+  <div id="rhythm-game-overlay" class="rhythm-game-overlay">
+    <!-- Song Selection View -->
+    <div id="game-song-select" class="game-view">
+      <div class="game-header">
+        <h2>Rhythm Game</h2>
+        <button id="game-close-btn">✕</button>
+      </div>
+
+      <!-- Mode Tabs -->
+      <div class="mode-tabs">
+        <button id="mode-tab-piano" class="mode-tab active">Piano Mode</button>
+        <button id="mode-tab-vocal" class="mode-tab">Vocal Mode</button>
+      </div>
+
+      <div class="game-settings">
+        <div class="setting-item">
+          <label>노트 속도:</label>
+          <input type="range" id="note-speed" min="200" max="800" value="400">
+          <span class="setting-value" id="speed-value">400</span>
+        </div>
+        <div class="setting-item">
+          <label>싱크 보정:</label>
+          <input type="range" id="audio-offset" min="-200" max="200" value="0" step="10">
+          <span class="setting-value" id="offset-value">0ms</span>
+        </div>
+        <div class="setting-item">
+          <label>판정:</label>
+          <select id="judge-difficulty">
+            <option value="easy">Easy (넓음)</option>
+            <option value="normal" selected>Normal</option>
+            <option value="hard">Hard (좁음)</option>
+            <option value="very-hard">Very Hard</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Piano Mode Panel -->
+      <div id="piano-song-panel" class="song-panel">
+        <div style="width:100%;max-width:700px;margin-bottom:12px;">
+          <button id="game-import-btn" class="game-btn game-btn-secondary" style="width:100%;">외부 MIDI 파일 불러오기</button>
+        </div>
+        <div id="song-list" class="song-list"></div>
+      </div>
+
+      <!-- Vocal Mode Panel -->
+      <div id="vocal-song-panel" class="song-panel" style="display:none;">
+        <div class="vocal-url-section">
+          <div class="vocal-url-row">
+            <input type="text" id="vocal-url-input" class="vocal-url-input" placeholder="YouTube URL 입력..." autocomplete="off">
+            <button id="vocal-analyze-btn" class="game-btn game-btn-primary vocal-analyze-btn">분석 시작</button>
+          </div>
+          <div id="vocal-progress" class="vocal-progress" style="display:none;">
+            <div class="vocal-progress-bar-bg">
+              <div id="vocal-progress-bar" class="vocal-progress-bar"></div>
+            </div>
+            <div id="vocal-progress-text" class="vocal-progress-text">준비 중...</div>
+          </div>
+        </div>
+        <div class="vocal-list-header">이전에 분석한 곡</div>
+        <div id="vocal-song-list" class="song-list"></div>
+      </div>
+    </div>
+
+    <!-- Game Playing View -->
+    <div id="game-playing" class="game-view">
+      <video id="game-bg-video" class="game-bg-video" muted playsinline></video>
+      <canvas id="game-canvas"></canvas>
+      <div id="game-hud" class="game-hud">
+        <div class="hud-score" id="hud-score">0</div>
+        <div class="hud-combo" id="hud-combo"></div>
+        <div class="hud-judgment" id="hud-judgment"></div>
+      </div>
+      <div id="game-pause-overlay" class="game-pause-overlay">
+        <h2>PAUSED</h2>
+        <button id="game-resume-btn" class="game-btn game-btn-primary">Resume</button>
+        <button id="game-quit-btn" class="game-btn game-btn-secondary">Quit</button>
+      </div>
+    </div>
+
+    <!-- Results View -->
+    <div id="game-results" class="game-view">
+      <div class="results-card">
+        <h2>Results</h2>
+        <div id="results-stats"></div>
+        <div class="results-buttons">
+          <button id="results-retry-btn" class="game-btn game-btn-primary">Retry</button>
+          <button id="results-back-btn" class="game-btn game-btn-secondary">Back</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="scripts/app.js"></script>
   <script src="scripts/ui-controller.js"></script>
   <script src="scripts/progress-handler.js"></script>
+  <script src="scripts/rhythm-game.js"></script>
+  <script src="scripts/rhythm-game-ui.js"></script>
 </body>
 </html>

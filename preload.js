@@ -37,5 +37,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getOutputDir: () => ipcRenderer.invoke('get-output-dir'),
 
   // Get conversion history
-  getHistory: () => ipcRenderer.invoke('get-history')
+  getHistory: () => ipcRenderer.invoke('get-history'),
+
+  // Rhythm game APIs
+  listMidiFiles: () => ipcRenderer.invoke('list-midi-files'),
+  loadMidiForGame: (midiPath) => ipcRenderer.invoke('load-midi-for-game', midiPath),
+  readAudioFile: (audioPath) => ipcRenderer.invoke('read-audio-file', audioPath),
+
+  // Import external MIDI file via file dialog
+  importMidiFile: () => ipcRenderer.invoke('import-midi-file'),
+
+  // Vocal rhythm game: prepare song from URL
+  prepareVocalGame: (url) => ipcRenderer.invoke('prepare-vocal-game', url),
+
+  // Listen for vocal game preparation progress
+  onVocalGameProgress: (callback) => {
+    const subscription = (event, data) => callback(data);
+    ipcRenderer.on('vocal-game-progress', subscription);
+    return () => ipcRenderer.removeListener('vocal-game-progress', subscription);
+  },
+
+  // Convert local file path to file:// URL for video playback
+  pathToFileURL: (filePath) => {
+    // Normalize Windows backslashes and encode for URL
+    const normalized = filePath.replace(/\\/g, '/');
+    return 'file:///' + encodeURI(normalized).replace(/#/g, '%23');
+  }
 });

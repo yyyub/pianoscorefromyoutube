@@ -1,55 +1,88 @@
 // UI Controller - Manages UI state and updates
 
+// ─── ETA Tracking State ────────────────────────────
+
 let processStartTime = null;
 let lastPercentage = 0;
 let lastUpdateTime = null;
-let recentSpeeds = []; // Array of ms per 1% progress
+let lastDisplayedETA = '';
+let lastETAUpdateTime = 0;
+let currentTrackingStep = 0;
+
+// Per-step timing history: records how long each step actually took
+// Used to estimate remaining steps based on past runs
+let stepHistory = {}; // { stepNum: { startTime, endTime, duration } }
+let stepStartTime = null;
+
+// Exponential moving average for smoothing
+let emaSpeed = null; // ms per 1% (exponential moving average)
+const EMA_ALPHA = 0.3; // smoothing factor: 0 = ignore new data, 1 = only new data
 
 function formatETA(remainingMs) {
   if (remainingMs <= 0 || !isFinite(remainingMs)) return '';
-  const totalSec = Math.ceil(remainingMs / 1000);
+  const totalSec = Math.round(remainingMs / 1000);
   if (totalSec < 5) return '곧 완료';
-  if (totalSec < 60) return `약 ${totalSec}초 남음`;
-  const min = Math.floor(totalSec / 60);
-  const sec = totalSec % 60;
+  // Round to nearest 5 seconds for stability
+  const rounded = Math.ceil(totalSec / 5) * 5;
+  if (rounded < 60) return `약 ${rounded}초 남음`;
+  const min = Math.floor(rounded / 60);
+  const sec = rounded % 60;
   if (sec === 0) return `약 ${min}분 남음`;
   return `약 ${min}분 ${sec}초 남음`;
 }
 
-function getETA(percentage) {
+function getETA(step, percentage) {
   if (!processStartTime || percentage <= 0 || percentage >= 100) return '';
 
   const now = Date.now();
 
-  // Calculate speed for this update (ms per 1% progress)
-  if (lastUpdateTime && lastPercentage < percentage) {
+  // Reset EMA when step changes
+  if (step !== currentTrackingStep) {
+    // Record previous step duration
+    if (currentTrackingStep > 0 && stepStartTime) {
+      stepHistory[currentTrackingStep] = {
+        duration: now - stepStartTime
+      };
+    }
+    currentTrackingStep = step;
+    stepStartTime = now;
+    emaSpeed = null;
+    lastPercentage = percentage;
+    lastUpdateTime = now;
+    return lastDisplayedETA; // Keep showing previous ETA during transition
+  }
+
+  // Calculate speed for this update
+  if (lastUpdateTime && percentage > lastPercentage) {
     const timeDiff = now - lastUpdateTime;
     const percentDiff = percentage - lastPercentage;
-    const speed = timeDiff / percentDiff; // ms per 1%
 
-    // Keep only last 5 measurements for moving average (more responsive)
-    recentSpeeds.push(speed);
-    if (recentSpeeds.length > 5) {
-      recentSpeeds.shift();
+    // Ignore obviously wrong measurements (e.g., step jump causing >50% jump)
+    if (percentDiff < 20 && timeDiff > 100) {
+      const speed = timeDiff / percentDiff; // ms per 1%
+
+      if (emaSpeed === null) {
+        emaSpeed = speed;
+      } else {
+        emaSpeed = EMA_ALPHA * speed + (1 - EMA_ALPHA) * emaSpeed;
+      }
     }
   }
 
-  // Need at least 2 measurements
-  if (recentSpeeds.length < 2) return '';
-
-  // Calculate average speed (ignore outliers by removing min/max if we have enough samples)
-  let speeds = [...recentSpeeds];
-  if (speeds.length >= 4) {
-    speeds.sort((a, b) => a - b);
-    speeds = speeds.slice(1, -1); // Remove min and max
-  }
-  const avgSpeed = speeds.reduce((sum, s) => sum + s, 0) / speeds.length;
+  if (emaSpeed === null) return lastDisplayedETA;
 
   // Estimate remaining time
   const remainingPercent = 100 - percentage;
-  const remainingMs = avgSpeed * remainingPercent;
+  const remainingMs = emaSpeed * remainingPercent;
 
-  return formatETA(remainingMs);
+  // Throttle display updates: only update every 2 seconds to prevent flickering
+  const etaText = formatETA(remainingMs);
+  if (now - lastETAUpdateTime > 2000 || !lastDisplayedETA) {
+    lastDisplayedETA = etaText;
+    lastETAUpdateTime = now;
+  }
+
+  return lastDisplayedETA;
 }
 
 function addLog(message, type = 'info') {
@@ -108,7 +141,12 @@ function resetProgress() {
   processStartTime = null;
   lastPercentage = 0;
   lastUpdateTime = null;
-  recentSpeeds = [];
+  lastDisplayedETA = '';
+  lastETAUpdateTime = 0;
+  currentTrackingStep = 0;
+  stepHistory = {};
+  stepStartTime = null;
+  emaSpeed = null;
 
   // Reset ETA display
   const etaEl = document.getElementById('eta-text');
@@ -127,16 +165,15 @@ function updateProgress(step, percentage, message) {
   if (!processStartTime && percentage > 0) {
     processStartTime = now;
     lastUpdateTime = now;
+    stepStartTime = now;
+    currentTrackingStep = step;
   }
 
   // Update progress bar
   updateProgressBar(percentage);
 
-  // Calculate and update ETA (only for step 3 = transcription)
-  let eta = '';
-  if (step === 3) {
-    eta = getETA(percentage);
-  }
+  // Calculate ETA only for step 3 (transcription) since it's the only long step
+  const eta = step === 3 ? getETA(step, percentage) : '';
   updateProgressText(eta ? `${message}  |  ${eta}` : message);
 
   // Update ETA element if exists
