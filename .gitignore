@@ -15,6 +15,10 @@ temp/*
 output/*
 !output/.gitkeep
 
+# Cache files
+cache/*
+!cache/.gitkeep
+
 # Logs
 *.log
 npm-debug.log*
