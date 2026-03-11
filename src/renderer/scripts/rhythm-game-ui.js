@@ -108,15 +108,20 @@ class RhythmGameUI {
       }
     });
 
-    // Vocal URL analyze button
-    document.getElementById('vocal-analyze-btn').addEventListener('click', () => {
-      this._startVocalAnalysis();
-    });
+    // Vocal URL analyze UI was removed. Keep defensive guards for compatibility.
+    const vocalAnalyzeBtn = document.getElementById('vocal-analyze-btn');
+    if (vocalAnalyzeBtn) {
+      vocalAnalyzeBtn.addEventListener('click', () => {
+        this._startVocalAnalysis();
+      });
+    }
 
-    // Vocal URL input: Enter key
-    document.getElementById('vocal-url-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') this._startVocalAnalysis();
-    });
+    const vocalUrlInput = document.getElementById('vocal-url-input');
+    if (vocalUrlInput) {
+      vocalUrlInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') this._startVocalAnalysis();
+      });
+    }
 
     // Results buttons
     document.getElementById('results-retry-btn').addEventListener('click', () => {
@@ -529,7 +534,7 @@ class RhythmGameUI {
       const vocalFiles = files ? files.filter(f => f.hasVocalData) : [];
 
       if (vocalFiles.length === 0) {
-        vocalList.innerHTML = '<div class="song-empty">처리된 원곡이 없습니다.<br>위에서 YouTube URL을 입력하여 분석하세요.</div>';
+        vocalList.innerHTML = '<div class="song-empty">보컬 데이터가 있는 변환 결과가 없습니다.<br>변환된 곡 중 vocal-chart/instrumental/vocals 파일이 있는 항목만 표시됩니다.</div>';
         return;
       }
 

@@ -44,25 +44,42 @@
         <div class="advisor-card">
           <div class="advisor-header">
             <h3>변환 가이드</h3>
-            <p>곡 유형과 목표를 선택하면 권장 설정을 자동으로 맞춥니다.</p>
+            <p>URL 입력 후 위에서 아래 순서대로 한 줄씩 선택하세요.</p>
           </div>
-          <div class="advisor-grid">
-            <label class="advisor-field">
-              <span>입력 곡 유형</span>
-              <select id="source-type">
-                <option value="piano-cover" selected>피아노 커버</option>
-                <option value="original">원곡(보컬/밴드)</option>
-                <option value="unknown">잘 모르겠음</option>
-              </select>
-            </label>
-            <label class="advisor-field">
-              <span>변환 목표</span>
-              <select id="target-priority">
-                <option value="accuracy" selected>원곡 유사도 우선</option>
-                <option value="balanced">균형(정확도/난이도)</option>
-                <option value="speed">빠른 초안 우선</option>
-              </select>
-            </label>
+          <div class="guide-steps">
+            <div class="guide-row">
+              <span class="guide-label">1) 입력곡유형</span>
+              <div class="guide-controls radio-group">
+                <label class="radio-chip"><input type="radio" name="source-type" value="piano-cover" checked><span>피아노 커버</span></label>
+                <label class="radio-chip"><input type="radio" name="source-type" value="original"><span>원곡(보컬/밴드)</span></label>
+                <label class="radio-chip"><input type="radio" name="source-type" value="unknown"><span>잘 모르겠음</span></label>
+              </div>
+            </div>
+            <div class="guide-row">
+              <span class="guide-label">2) 변환목표</span>
+              <div class="guide-controls radio-group">
+                <label class="radio-chip"><input type="radio" name="target-priority" value="accuracy" checked><span>원곡 유사도 우선</span></label>
+                <label class="radio-chip"><input type="radio" name="target-priority" value="balanced"><span>균형(정확도/난이도)</span></label>
+                <label class="radio-chip"><input type="radio" name="target-priority" value="speed"><span>빠른 초안 우선</span></label>
+              </div>
+            </div>
+            <div class="guide-row">
+              <span class="guide-label">3) 난이도</span>
+              <div class="guide-controls radio-group">
+                <label class="radio-chip"><input type="radio" name="quality-mode" value="beginner"><span>초급</span></label>
+                <label class="radio-chip"><input type="radio" name="quality-mode" value="intermediate" checked><span>중급</span></label>
+                <label class="radio-chip"><input type="radio" name="quality-mode" value="advanced"><span>고급</span></label>
+              </div>
+            </div>
+            <div class="guide-row">
+              <span class="guide-label">4) 음원분리</span>
+              <div class="guide-controls">
+                <label class="option-row">
+                  <input type="checkbox" id="use-separation" checked>
+                  Demucs AI 분리 사용
+                </label>
+              </div>
+            </div>
           </div>
           <div class="issue-row">
             <label class="option-row">
@@ -88,21 +105,6 @@
           <button id="cancel-btn" class="btn btn-secondary" disabled>
             취소
           </button>
-        </div>
-
-        <div class="option-group">
-          <label class="option-row">
-            <input type="checkbox" id="use-separation" checked>
-            음원 분리 (Demucs AI) - 보컬/반주 분리로 품질 향상
-          </label>
-          <label class="option-row">
-            난이도:
-            <select id="quality-mode">
-              <option value="beginner">초급 (쉬운 악보)</option>
-              <option value="intermediate" selected>중급 (적당한 난이도)</option>
-              <option value="advanced">고급 (원곡에 가까움)</option>
-            </select>
-          </label>
         </div>
       </div>
 
@@ -230,19 +232,7 @@
 
       <!-- Vocal Mode Panel -->
       <div id="vocal-song-panel" class="song-panel" style="display:none;">
-        <div class="vocal-url-section">
-          <div class="vocal-url-row">
-            <input type="text" id="vocal-url-input" class="vocal-url-input" placeholder="YouTube URL 입력..." autocomplete="off">
-            <button id="vocal-analyze-btn" class="game-btn game-btn-primary vocal-analyze-btn">분석 시작</button>
-          </div>
-          <div id="vocal-progress" class="vocal-progress" style="display:none;">
-            <div class="vocal-progress-bar-bg">
-              <div id="vocal-progress-bar" class="vocal-progress-bar"></div>
-            </div>
-            <div id="vocal-progress-text" class="vocal-progress-text">준비 중...</div>
-          </div>
-        </div>
-        <div class="vocal-list-header">이전에 분석한 곡</div>
+        <div class="vocal-list-header">변환 완료된 곡 중 보컬 데이터</div>
         <div id="vocal-song-list" class="song-list"></div>
       </div>
     </div>

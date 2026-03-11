@@ -4,6 +4,31 @@ let generatedPdfPath = null;
 let generatedOutputDir = null;
 let latestRecommendation = null;
 
+function getRadioValue(name, fallback = '') {
+  const checked = document.querySelector(`input[name="${name}"]:checked`);
+  return checked ? checked.value : fallback;
+}
+
+function setRadioValue(name, value) {
+  const target = document.querySelector(`input[name="${name}"][value="${value}"]`);
+  if (target) target.checked = true;
+}
+
+function setRadioGroupDisabled(name, disabled) {
+  document.querySelectorAll(`input[name="${name}"]`).forEach(el => {
+    el.disabled = disabled;
+  });
+}
+
+function escapeAttr(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
   initializeEventListeners();
@@ -19,17 +44,17 @@ function initializeEventListeners() {
   const openPdfBtn = document.getElementById('open-pdf-btn');
   const openFolderBtn = document.getElementById('open-folder-btn');
   const useSeparationToggle = document.getElementById('use-separation');
-  const qualityModeSelect = document.getElementById('quality-mode');
-  const sourceTypeSelect = document.getElementById('source-type');
-  const targetPrioritySelect = document.getElementById('target-priority');
+  const qualityModeRadios = document.querySelectorAll('input[name="quality-mode"]');
+  const sourceTypeRadios = document.querySelectorAll('input[name="source-type"]');
+  const targetPriorityRadios = document.querySelectorAll('input[name="target-priority"]');
   const issueOffbeatToggle = document.getElementById('issue-offbeat');
   const issueWrongNotesToggle = document.getElementById('issue-wrong-notes');
   const applyRecommendedBtn = document.getElementById('apply-recommended-btn');
 
   const refreshRecommendation = () => {
     latestRecommendation = getRecommendation({
-      sourceType: sourceTypeSelect ? sourceTypeSelect.value : 'unknown',
-      targetPriority: targetPrioritySelect ? targetPrioritySelect.value : 'balanced',
+      sourceType: getRadioValue('source-type', 'unknown'),
+      targetPriority: getRadioValue('target-priority', 'balanced'),
       offbeat: issueOffbeatToggle ? issueOffbeatToggle.checked : false,
       wrongNotes: issueWrongNotesToggle ? issueWrongNotesToggle.checked : false
     });
@@ -57,9 +82,9 @@ function initializeEventListeners() {
 
     await startProcessing(url, {
       useSeparation: useSeparationToggle ? useSeparationToggle.checked : false,
-      qualityMode: qualityModeSelect ? qualityModeSelect.value : 'normal',
-      sourceType: sourceTypeSelect ? sourceTypeSelect.value : 'unknown',
-      targetPriority: targetPrioritySelect ? targetPrioritySelect.value : 'balanced',
+      qualityMode: getRadioValue('quality-mode', 'intermediate'),
+      sourceType: getRadioValue('source-type', 'unknown'),
+      targetPriority: getRadioValue('target-priority', 'balanced'),
       issueOffbeat: issueOffbeatToggle ? issueOffbeatToggle.checked : false,
       issueWrongNotes: issueWrongNotesToggle ? issueWrongNotesToggle.checked : false
     });
@@ -128,17 +153,17 @@ function initializeEventListeners() {
       if (!latestRecommendation) {
         refreshRecommendation();
       }
-      applyRecommendation(latestRecommendation, useSeparationToggle, qualityModeSelect);
+      applyRecommendation(latestRecommendation, useSeparationToggle);
     });
   }
 
-  [sourceTypeSelect, targetPrioritySelect, issueOffbeatToggle, issueWrongNotesToggle].forEach(el => {
+  [...sourceTypeRadios, ...targetPriorityRadios, ...qualityModeRadios, issueOffbeatToggle, issueWrongNotesToggle].forEach(el => {
     if (!el) return;
     el.addEventListener('change', refreshRecommendation);
   });
 
   refreshRecommendation();
-  applyRecommendation(latestRecommendation, useSeparationToggle, qualityModeSelect, false);
+  applyRecommendation(latestRecommendation, useSeparationToggle, false);
 }
 
 function setupIPCListeners() {
@@ -196,19 +221,13 @@ function prepareUI() {
   document.getElementById('youtube-url').disabled = true;
   document.getElementById('start-btn').disabled = true;
   document.getElementById('cancel-btn').disabled = false;
-  const controlIds = [
-    'use-separation',
-    'quality-mode',
-    'source-type',
-    'target-priority',
-    'issue-offbeat',
-    'issue-wrong-notes',
-    'apply-recommended-btn'
-  ];
-  controlIds.forEach(id => {
+  ['use-separation', 'issue-offbeat', 'issue-wrong-notes', 'apply-recommended-btn'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = true;
   });
+  setRadioGroupDisabled('quality-mode', true);
+  setRadioGroupDisabled('source-type', true);
+  setRadioGroupDisabled('target-priority', true);
 
   // Show progress section
   document.getElementById('progress-section').classList.add('active');
@@ -225,19 +244,13 @@ function resetUI() {
   document.getElementById('youtube-url').disabled = false;
   document.getElementById('start-btn').disabled = false;
   document.getElementById('cancel-btn').disabled = true;
-  const controlIds = [
-    'use-separation',
-    'quality-mode',
-    'source-type',
-    'target-priority',
-    'issue-offbeat',
-    'issue-wrong-notes',
-    'apply-recommended-btn'
-  ];
-  controlIds.forEach(id => {
+  ['use-separation', 'issue-offbeat', 'issue-wrong-notes', 'apply-recommended-btn'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = false;
   });
+  setRadioGroupDisabled('quality-mode', false);
+  setRadioGroupDisabled('source-type', false);
+  setRadioGroupDisabled('target-priority', false);
 
   // Reset progress
   resetProgress();
@@ -259,19 +272,13 @@ function showSuccess(pdfPath, filename) {
   document.getElementById('youtube-url').disabled = false;
   document.getElementById('start-btn').disabled = false;
   document.getElementById('cancel-btn').disabled = true;
-  const controlIds = [
-    'use-separation',
-    'quality-mode',
-    'source-type',
-    'target-priority',
-    'issue-offbeat',
-    'issue-wrong-notes',
-    'apply-recommended-btn'
-  ];
-  controlIds.forEach(id => {
+  ['use-separation', 'issue-offbeat', 'issue-wrong-notes', 'apply-recommended-btn'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = false;
   });
+  setRadioGroupDisabled('quality-mode', false);
+  setRadioGroupDisabled('source-type', false);
+  setRadioGroupDisabled('target-priority', false);
 
   addLog(`변환 완료: ${filename}`, 'success');
   loadHistory();
@@ -308,12 +315,15 @@ async function loadHistory() {
       const dateStr = `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`;
       const title = entry.title.length > 40 ? entry.title.slice(0, 40) + '...' : entry.title;
       const canReconvert = Boolean(entry.url);
-      return `<div class="history-item" data-url="${entry.url || ''}" title="${entry.title}">
-        <span class="history-title">${title}</span>
+      const safeUrl = escapeAttr(entry.url || '');
+      const safeTitle = escapeAttr(entry.title || '');
+      const safeTitleText = escapeAttr(title);
+      return `<div class="history-item" data-url="${safeUrl}" title="${safeTitle}">
+        <span class="history-title">${safeTitleText}</span>
         <div class="history-right">
           <span class="history-date">${dateStr}</span>
-          <button class="history-action history-reconvert" data-url="${entry.url || ''}" data-title="${entry.title}" type="button" ${canReconvert ? '' : 'disabled'}>${canReconvert ? '재변환' : 'URL없음'}</button>
-          <button class="history-action history-delete" data-url="${entry.url || ''}" data-title="${entry.title}" type="button">삭제</button>
+          <button class="history-action history-reconvert" data-url="${safeUrl}" data-title="${safeTitle}" type="button" ${canReconvert ? '' : 'disabled'}>${canReconvert ? '재변환' : 'URL없음'}</button>
+          <button class="history-action history-delete" data-url="${safeUrl}" data-title="${safeTitle}" type="button">삭제</button>
         </div>
       </div>`;
     }).join('');
@@ -339,9 +349,9 @@ async function loadHistory() {
         addLog(`히스토리 재변환 시작: ${btn.dataset.title || url}`, 'info');
         await startProcessing(url, {
           useSeparation: document.getElementById('use-separation')?.checked ?? false,
-          qualityMode: document.getElementById('quality-mode')?.value ?? 'intermediate',
-          sourceType: document.getElementById('source-type')?.value ?? 'unknown',
-          targetPriority: document.getElementById('target-priority')?.value ?? 'balanced',
+          qualityMode: getRadioValue('quality-mode', 'intermediate'),
+          sourceType: getRadioValue('source-type', 'unknown'),
+          targetPriority: getRadioValue('target-priority', 'balanced'),
           issueOffbeat: document.getElementById('issue-offbeat')?.checked ?? false,
           issueWrongNotes: document.getElementById('issue-wrong-notes')?.checked ?? false
         });
@@ -354,7 +364,6 @@ async function loadHistory() {
         if (isProcessing) return;
         const url = btn.dataset.url;
         const title = btn.dataset.title || '이 항목';
-        if (!url) return;
 
         const ok = window.confirm(`'${title}' 변환 기록과 생성 파일을 삭제할까요?`);
         if (!ok) return;
@@ -454,16 +463,14 @@ function renderRecommendation(recommendation) {
   }
 }
 
-function applyRecommendation(recommendation, useSeparationToggle, qualityModeSelect, withLog = true) {
+function applyRecommendation(recommendation, useSeparationToggle, withLog = true) {
   if (!recommendation) return;
 
   if (useSeparationToggle) {
     useSeparationToggle.checked = recommendation.useSeparation;
   }
 
-  if (qualityModeSelect) {
-    qualityModeSelect.value = recommendation.qualityMode;
-  }
+  setRadioValue('quality-mode', recommendation.qualityMode);
 
   if (withLog) {
     addLog(`권장 설정 적용: ${recommendation.summary}`, 'success');
