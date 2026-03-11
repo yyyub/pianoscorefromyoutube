@@ -110,6 +110,19 @@ function initializeEventListeners() {
     showAboutDialog();
   });
 
+  // Rhythm game buttons
+  document.getElementById('rhythm-game-btn').addEventListener('click', (e) => {
+    e.preventDefault();
+    if (typeof rhythmGameUI !== 'undefined') rhythmGameUI.show();
+  });
+
+  const rhythmGameResultBtn = document.getElementById('rhythm-game-result-btn');
+  if (rhythmGameResultBtn) {
+    rhythmGameResultBtn.addEventListener('click', () => {
+      if (typeof rhythmGameUI !== 'undefined') rhythmGameUI.show();
+    });
+  }
+
   if (applyRecommendedBtn) {
     applyRecommendedBtn.addEventListener('click', () => {
       if (!latestRecommendation) {
