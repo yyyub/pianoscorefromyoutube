@@ -10,6 +10,18 @@ class RhythmGameUI {
     this._judgmentTimeout = null;
     this._bgVideo = null;
     this._vocalProgressUnsub = null;
+    this._calibrationRunning = false;
+    this._calibrationInterval = null;
+    this._calibrationAudioCtx = null;
+    this._calibrationBeatTimes = [];
+    this._calibrationTapTimes = [];
+    this._calibrationBeatIndex = 0;
+    this._calibrationBoundKeydown = (e) => this._handleCalibrationKeydown(e);
+    this._calibrationConfig = {
+      intervalMs: 500,
+      warmupBeats: 4,
+      recordBeats: 12
+    };
 
     // Current mode: 'piano' or 'vocal'
     this.currentMode = 'piano';
@@ -24,6 +36,7 @@ class RhythmGameUI {
     this.currentVocalsPath = null;
     this.currentVocalChartPath = null;
     this.currentVocalMidiData = null;
+    this.currentChartKey = null;
   }
 
   init() {
@@ -48,20 +61,40 @@ class RhythmGameUI {
 
     // Speed slider
     const speedSlider = document.getElementById('note-speed');
-    const speedLabel = document.getElementById('speed-value');
     speedSlider.addEventListener('input', () => {
-      speedLabel.textContent = speedSlider.value;
-      if (this.game) this.game.setNoteSpeed(parseInt(speedSlider.value));
+      this._setNoteSpeed(parseInt(speedSlider.value, 10), 'main');
     });
 
     // Audio offset slider
     const offsetSlider = document.getElementById('audio-offset');
-    const offsetLabel = document.getElementById('offset-value');
     offsetSlider.addEventListener('input', () => {
-      const val = parseInt(offsetSlider.value);
-      offsetLabel.textContent = (val >= 0 ? '+' : '') + val + 'ms';
-      if (this.game) this.game.setAudioOffset(val);
+      this._setAudioOffset(parseInt(offsetSlider.value, 10), 'main');
     });
+
+    const pauseSpeedSlider = document.getElementById('pause-note-speed');
+    if (pauseSpeedSlider) {
+      pauseSpeedSlider.addEventListener('input', () => {
+        this._setNoteSpeed(parseInt(pauseSpeedSlider.value, 10), 'pause');
+      });
+    }
+
+    const pauseOffsetSlider = document.getElementById('pause-audio-offset');
+    if (pauseOffsetSlider) {
+      pauseOffsetSlider.addEventListener('input', () => {
+        this._setAudioOffset(parseInt(pauseOffsetSlider.value, 10), 'pause');
+      });
+    }
+
+    const syncCalibrateBtn = document.getElementById('sync-calibrate-btn');
+    if (syncCalibrateBtn) {
+      syncCalibrateBtn.addEventListener('click', () => {
+        if (this._calibrationRunning) {
+          this._stopSyncCalibration(true);
+        } else {
+          this._startSyncCalibration();
+        }
+      });
+    }
 
     // Import MIDI button
     document.getElementById('game-import-btn').addEventListener('click', async () => {
@@ -129,17 +162,13 @@ class RhythmGameUI {
         if (e.key === 'ArrowUp') {
           e.preventDefault();
           const newSpeed = Math.min(1200, this.game.noteSpeed + 50);
-          this.game.setNoteSpeed(newSpeed);
-          speedSlider.value = newSpeed;
-          speedLabel.textContent = newSpeed;
+          this._setNoteSpeed(newSpeed, 'main');
           this._showSpeedIndicator(newSpeed);
         }
         if (e.key === 'ArrowDown') {
           e.preventDefault();
           const newSpeed = Math.max(100, this.game.noteSpeed - 50);
-          this.game.setNoteSpeed(newSpeed);
-          speedSlider.value = newSpeed;
-          speedLabel.textContent = newSpeed;
+          this._setNoteSpeed(newSpeed, 'main');
           this._showSpeedIndicator(newSpeed);
         }
       }
@@ -168,6 +197,11 @@ class RhythmGameUI {
   }
 
   hide() {
+    this._stopSyncCalibration(false);
+    if (this._judgmentTimeout) {
+      clearTimeout(this._judgmentTimeout);
+      this._judgmentTimeout = null;
+    }
     if (this.game) {
       this.game.destroy();
       this.game = null;
@@ -181,8 +215,203 @@ class RhythmGameUI {
   }
 
   _showView(viewName) {
+    if (viewName !== 'songSelect' && this._calibrationRunning) {
+      this._stopSyncCalibration(false);
+    }
     Object.values(this.views).forEach(v => v.style.display = 'none');
     this.views[viewName].style.display = 'flex';
+  }
+
+  // ─── Sync Calibration ───────────────────────────
+
+  _setCalibrationStatus(text) {
+    const statusEl = document.getElementById('sync-calibrate-status');
+    if (statusEl) statusEl.textContent = text;
+  }
+
+  _setNoteSpeed(value, source = 'main') {
+    const safe = Math.max(100, Math.min(1200, Number.isFinite(value) ? value : 400));
+
+    const speedSlider = document.getElementById('note-speed');
+    const speedLabel = document.getElementById('speed-value');
+    const pauseSpeedSlider = document.getElementById('pause-note-speed');
+    const pauseSpeedLabel = document.getElementById('pause-speed-value');
+
+    if (source !== 'main' && speedSlider) speedSlider.value = String(safe);
+    if (source !== 'pause' && pauseSpeedSlider) pauseSpeedSlider.value = String(safe);
+    if (speedLabel) speedLabel.textContent = String(safe);
+    if (pauseSpeedLabel) pauseSpeedLabel.textContent = String(safe);
+
+    if (this.game) this.game.setNoteSpeed(safe);
+  }
+
+  _setAudioOffset(value, source = 'main') {
+    const safe = Math.max(-200, Math.min(200, Number.isFinite(value) ? value : 0));
+
+    const offsetSlider = document.getElementById('audio-offset');
+    const offsetLabel = document.getElementById('offset-value');
+    const pauseOffsetSlider = document.getElementById('pause-audio-offset');
+    const pauseOffsetLabel = document.getElementById('pause-offset-value');
+    const text = (safe >= 0 ? '+' : '') + safe + 'ms';
+
+    if (source !== 'main' && offsetSlider) offsetSlider.value = String(safe);
+    if (source !== 'pause' && pauseOffsetSlider) pauseOffsetSlider.value = String(safe);
+    if (offsetLabel) offsetLabel.textContent = text;
+    if (pauseOffsetLabel) pauseOffsetLabel.textContent = text;
+
+    if (this.game) this.game.setAudioOffset(safe);
+  }
+
+  _startSyncCalibration() {
+    if (this._calibrationRunning) return;
+
+    const btn = document.getElementById('sync-calibrate-btn');
+    if (!btn) return;
+
+    this._calibrationRunning = true;
+    this._calibrationBeatTimes = [];
+    this._calibrationTapTimes = [];
+    this._calibrationBeatIndex = 0;
+
+    btn.textContent = '측정 중지';
+    this._setCalibrationStatus('준비: 곧 비프음 시작');
+
+    document.addEventListener('keydown', this._calibrationBoundKeydown);
+
+    try {
+      this._calibrationAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (err) {
+      this._setCalibrationStatus('오디오 초기화 실패');
+      this._stopSyncCalibration(false);
+      return;
+    }
+
+    const { intervalMs, warmupBeats, recordBeats } = this._calibrationConfig;
+    const totalBeats = warmupBeats + recordBeats;
+
+    this._calibrationInterval = setInterval(() => {
+      if (!this._calibrationRunning) return;
+
+      this._calibrationBeatIndex += 1;
+      const beat = this._calibrationBeatIndex;
+      const isWarmup = beat <= warmupBeats;
+      const measuredBeat = beat - warmupBeats;
+      const isLast = beat >= totalBeats;
+
+      this._playCalibrationBeep(isWarmup ? 900 : 1200, isWarmup ? 0.04 : 0.06);
+
+      const now = performance.now();
+      if (!isWarmup) {
+        this._calibrationBeatTimes.push(now);
+        this._setCalibrationStatus(`측정 중: ${measuredBeat}/${recordBeats} (Space)`);
+      } else {
+        this._setCalibrationStatus(`워밍업: ${beat}/${warmupBeats}`);
+      }
+
+      if (isLast) {
+        this._stopSyncCalibration(false);
+        this._finalizeSyncCalibration();
+      }
+    }, intervalMs);
+  }
+
+  _stopSyncCalibration(userCancelled) {
+    if (!this._calibrationRunning && !this._calibrationInterval && !this._calibrationAudioCtx) return;
+
+    this._calibrationRunning = false;
+    document.removeEventListener('keydown', this._calibrationBoundKeydown);
+
+    if (this._calibrationInterval) {
+      clearInterval(this._calibrationInterval);
+      this._calibrationInterval = null;
+    }
+
+    if (this._calibrationAudioCtx) {
+      this._calibrationAudioCtx.close().catch(() => {});
+      this._calibrationAudioCtx = null;
+    }
+
+    const btn = document.getElementById('sync-calibrate-btn');
+    if (btn) btn.textContent = '싱크 맞추기 시작';
+
+    if (userCancelled) {
+      this._setCalibrationStatus('중지됨');
+    }
+  }
+
+  _playCalibrationBeep(frequency, durationSec) {
+    if (!this._calibrationAudioCtx) return;
+
+    const ctx = this._calibrationAudioCtx;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'square';
+    osc.frequency.value = frequency;
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.12, now + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + durationSec);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + durationSec + 0.01);
+  }
+
+  _handleCalibrationKeydown(e) {
+    if (!this._calibrationRunning) return;
+    if (e.repeat) return;
+
+    const key = e.key.toLowerCase();
+    if (key !== ' ' && key !== 'spacebar' && key !== 'enter') return;
+
+    e.preventDefault();
+    this._calibrationTapTimes.push(performance.now());
+  }
+
+  _finalizeSyncCalibration() {
+    const beatTimes = this._calibrationBeatTimes;
+    const tapTimes = this._calibrationTapTimes;
+
+    if (!beatTimes.length || !tapTimes.length) {
+      this._setCalibrationStatus('탭 입력 부족');
+      return;
+    }
+
+    const diffs = [];
+    for (const tap of tapTimes) {
+      let nearest = null;
+      let nearestAbs = Infinity;
+      for (const beat of beatTimes) {
+        const diff = tap - beat;
+        const abs = Math.abs(diff);
+        if (abs < nearestAbs) {
+          nearestAbs = abs;
+          nearest = diff;
+        }
+      }
+      if (nearest !== null && nearestAbs <= 220) diffs.push(nearest);
+    }
+
+    if (diffs.length < 4) {
+      this._setCalibrationStatus('샘플 부족: 다시 측정');
+      return;
+    }
+
+    diffs.sort((a, b) => a - b);
+    const cut = Math.floor(diffs.length * 0.2);
+    const trimmed = diffs.slice(cut, diffs.length - cut);
+    const sample = trimmed.length >= 3 ? trimmed : diffs;
+    const mean = sample.reduce((sum, v) => sum + v, 0) / sample.length;
+
+    // If taps are late (+), game offset should move negative.
+    const recommended = Math.max(-200, Math.min(200, Math.round((-mean) / 10) * 10));
+
+    this._setAudioOffset(recommended, 'main');
+
+    this._setCalibrationStatus(`완료: ${recommended >= 0 ? '+' : ''}${recommended}ms 적용`);
   }
 
   // ─── Speed Indicator ───────────────────────────
@@ -406,23 +635,33 @@ class RhythmGameUI {
     const hudScore = document.getElementById('hud-score');
     const hudCombo = document.getElementById('hud-combo');
     const hudJudgment = document.getElementById('hud-judgment');
+    const hudHpBar = document.getElementById('hud-hp-bar');
+    const hudHpText = document.getElementById('hud-hp-text');
 
     hudScore.textContent = '0';
     hudCombo.style.display = 'none';
     hudJudgment.style.display = 'none';
+    if (hudHpBar) {
+      hudHpBar.style.width = '100%';
+      hudHpBar.style.background = 'linear-gradient(90deg, #4D96FF, #6BCB77)';
+    }
+    if (hudHpText) {
+      hudHpText.textContent = 'HP 100';
+    }
 
     if (this.game) {
       this.game.destroy();
     }
 
     this.game = new RhythmGame(canvas);
+    this.currentChartKey = this._getCurrentChartKey();
 
     // Apply settings
-    const speed = parseInt(document.getElementById('note-speed').value) || 400;
-    this.game.setNoteSpeed(speed);
+    const speed = parseInt(document.getElementById('note-speed').value, 10) || 400;
+    this._setNoteSpeed(speed, 'main');
 
-    const offset = parseInt(document.getElementById('audio-offset').value) || 0;
-    this.game.setAudioOffset(offset);
+    const offset = parseInt(document.getElementById('audio-offset').value, 10) || 0;
+    this._setAudioOffset(offset, 'main');
 
     const judgeDiff = document.getElementById('judge-difficulty').value || 'normal';
     this.game.setJudgeDifficulty(judgeDiff);
@@ -450,9 +689,12 @@ class RhythmGameUI {
     }
 
     // HUD callbacks (combo is drawn on canvas, score + judgment on HTML HUD)
-    this.game.onScoreUpdate = (score, combo, judgment) => {
+    this.game.onScoreUpdate = (score, combo, judgment, detail = null) => {
       hudScore.textContent = score.toLocaleString();
-      // Combo is rendered on canvas with effects — no HTML HUD for combo
+      if (detail && typeof detail.hp === 'number') {
+        this._updateHpHud(detail.hp);
+      }
+      this._showLiveJudgment(judgment, detail);
     };
 
     // Pause callback
@@ -468,6 +710,7 @@ class RhythmGameUI {
     this.game.onEnd = (results) => {
       this._pauseBgVideo();
       results.gameMode = this.currentMode;
+      results.bestRecord = this._updateBestRecord(this.currentChartKey, results);
       this._showResults(results);
     };
 
@@ -511,6 +754,113 @@ class RhythmGameUI {
     await this.game.loadVocalAudio(instrBuffer, vocalBuffer);
   }
 
+  _updateHpHud(hp) {
+    const hudHpBar = document.getElementById('hud-hp-bar');
+    const hudHpText = document.getElementById('hud-hp-text');
+    const clamped = Math.max(0, Math.min(100, Math.round(hp)));
+
+    if (hudHpBar) {
+      hudHpBar.style.width = `${clamped}%`;
+      if (clamped > 60) {
+        hudHpBar.style.background = 'linear-gradient(90deg, #4D96FF, #6BCB77)';
+      } else if (clamped > 30) {
+        hudHpBar.style.background = 'linear-gradient(90deg, #FFD93D, #FF9F43)';
+      } else {
+        hudHpBar.style.background = 'linear-gradient(90deg, #FF6B6B, #FF3B3B)';
+      }
+    }
+
+    if (hudHpText) {
+      hudHpText.textContent = `HP ${clamped}`;
+    }
+  }
+
+  _showLiveJudgment(judgment, detail = null) {
+    const hudJudgment = document.getElementById('hud-judgment');
+    if (!hudJudgment || !judgment) return;
+
+    const timingLabel = detail ? detail.timingLabel : null;
+    const timingMs = detail ? detail.timingMs : null;
+
+    let text = judgment.toUpperCase();
+    if ((timingLabel === 'FAST' || timingLabel === 'SLOW') && typeof timingMs === 'number') {
+      const sign = timingMs > 0 ? '+' : '';
+      text = `${text} ${timingLabel} ${sign}${timingMs}ms`;
+    } else if (timingLabel === 'CENTER' && typeof timingMs === 'number') {
+      const sign = timingMs > 0 ? '+' : '';
+      text = `${text} ${sign}${timingMs}ms`;
+    }
+
+    hudJudgment.textContent = text;
+    hudJudgment.style.display = 'block';
+    hudJudgment.classList.remove('judgment-pop', 'fast', 'slow', 'center');
+    if (timingLabel === 'FAST') hudJudgment.classList.add('fast');
+    if (timingLabel === 'SLOW') hudJudgment.classList.add('slow');
+    if (timingLabel === 'CENTER') hudJudgment.classList.add('center');
+    void hudJudgment.offsetWidth;
+    hudJudgment.classList.add('judgment-pop');
+
+    if (this._judgmentTimeout) clearTimeout(this._judgmentTimeout);
+    this._judgmentTimeout = setTimeout(() => {
+      hudJudgment.style.display = 'none';
+    }, 500);
+  }
+
+  _getCurrentChartKey() {
+    if (this.currentMode === 'vocal') {
+      const base = this.currentVocalChartPath || this.currentVocalsPath || this.currentInstrumentalPath || 'vocal-unknown';
+      return `vocal:${base}`;
+    }
+    const base = this.currentMidiPath || 'piano-unknown';
+    return `piano:${base}`;
+  }
+
+  _loadBestRecords() {
+    try {
+      const raw = localStorage.getItem('rhythm-game-best-v1');
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') return parsed;
+      return {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  _saveBestRecords(records) {
+    try {
+      localStorage.setItem('rhythm-game-best-v1', JSON.stringify(records));
+    } catch (_) {}
+  }
+
+  _updateBestRecord(chartKey, results) {
+    if (!chartKey || !results) return null;
+
+    const records = this._loadBestRecords();
+    const prev = records[chartKey] || null;
+    const next = {
+      score: results.score || 0,
+      accuracy: results.accuracy || 0,
+      maxCombo: results.maxCombo || 0,
+      grade: results.grade || 'D',
+      cleared: !results.failed,
+      updatedAt: Date.now()
+    };
+
+    const prevScore = prev ? prev.score || 0 : 0;
+    const shouldReplace = !prev || next.score > prevScore;
+    if (shouldReplace) {
+      records[chartKey] = next;
+      this._saveBestRecords(records);
+    }
+
+    return {
+      isNewRecord: shouldReplace,
+      current: next,
+      best: shouldReplace ? next : prev
+    };
+  }
+
   // ─── Results ───────────────────────────────────
 
   _showResults(results) {
@@ -520,6 +870,21 @@ class RhythmGameUI {
     const gradeColors = { S: '#FFD700', A: '#00FF88', B: '#4D96FF', C: '#FFD93D', D: '#FF6B6B' };
     const modeLabel = results.gameMode === 'vocal' ? 'Vocal Mode' : 'Piano Mode';
     const modeColor = results.gameMode === 'vocal' ? '#FF6B9D' : '#4D96FF';
+    const clearLabel = results.failed ? 'FAILED' : 'CLEARED';
+    const clearColor = results.failed ? '#FF6B6B' : '#6BCB77';
+    const timing = results.timing || { fast: 0, slow: 0, avgAbsMs: 0, avgMs: 0 };
+
+    let bestHtml = '';
+    if (results.bestRecord && results.bestRecord.best) {
+      const best = results.bestRecord.best;
+      const tag = results.bestRecord.isNewRecord ? 'NEW BEST' : 'BEST';
+      bestHtml = `
+        <div class="results-best" style="margin:10px 0 14px;padding:8px 10px;border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:rgba(255,255,255,0.03);">
+          <div style="font-size:0.72rem;color:${results.bestRecord.isNewRecord ? '#FFD700' : 'rgba(255,255,255,0.5)'};font-weight:800;letter-spacing:0.7px;">${tag}</div>
+          <div style="font-size:0.9rem;color:#fff;margin-top:3px;">${Number(best.score || 0).toLocaleString()} pts · ${best.accuracy || 0}% · ${best.grade || 'D'}</div>
+        </div>
+      `;
+    }
 
     let completionHtml = '';
     if (results.gameMode === 'vocal') {
@@ -531,9 +896,11 @@ class RhythmGameUI {
 
     statsEl.innerHTML = `
       <div class="results-mode" style="color:${modeColor};font-size:0.85rem;font-weight:600;margin-bottom:12px;letter-spacing:1px;">${modeLabel}</div>
+      <div class="results-clear" style="color:${clearColor};font-size:0.82rem;font-weight:800;letter-spacing:1px;margin-bottom:8px;">${clearLabel}</div>
       <div class="results-grade" style="color:${gradeColors[results.grade] || '#fff'}">${results.grade}</div>
       <div class="results-score">${results.score.toLocaleString()}</div>
       <div class="results-accuracy">Accuracy: ${results.accuracy}%</div>
+      ${bestHtml}
       ${completionHtml}
       <div class="results-detail">
         <div class="results-row">
@@ -552,8 +919,18 @@ class RhythmGameUI {
           <span class="results-label" style="color:#FF4444">MISS</span>
           <span class="results-count">${results.judgments.miss}</span>
         </div>
+        <div class="results-row">
+          <span class="results-label" style="color:#4D96FF">FAST</span>
+          <span class="results-count">${timing.fast}</span>
+        </div>
+        <div class="results-row">
+          <span class="results-label" style="color:#FF9F43">SLOW</span>
+          <span class="results-count">${timing.slow}</span>
+        </div>
       </div>
       <div class="results-combo">Max Combo: ${results.maxCombo}</div>
+      <div class="results-combo">Avg Error: ${timing.avgAbsMs}ms (Bias ${timing.avgMs > 0 ? '+' : ''}${timing.avgMs}ms)</div>
+      <div class="results-combo">End HP: ${results.hp}</div>
       <div class="results-total">Total Notes: ${results.totalNotes}</div>
       <div class="results-difficulty">Difficulty: Lv.${results.difficultyLevel || '?'} / 20</div>
     `;

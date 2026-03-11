@@ -190,7 +190,7 @@
       <div class="game-settings">
         <div class="setting-item">
           <label>노트 속도:</label>
-          <input type="range" id="note-speed" min="200" max="800" value="400">
+          <input type="range" id="note-speed" min="200" max="1200" value="400">
           <span class="setting-value" id="speed-value">400</span>
         </div>
         <div class="setting-item">
@@ -206,6 +206,11 @@
             <option value="hard">Hard (좁음)</option>
             <option value="very-hard">Very Hard</option>
           </select>
+        </div>
+        <div class="setting-item setting-item-sync">
+          <label>싱크 자동:</label>
+          <button id="sync-calibrate-btn" class="game-btn game-btn-secondary sync-calibrate-btn" type="button">싱크 맞추기 시작</button>
+          <span class="setting-value sync-status" id="sync-calibrate-status">대기</span>
         </div>
       </div>
 
@@ -241,12 +246,30 @@
       <div id="game-play-area" class="game-play-area">
         <canvas id="game-canvas"></canvas>
         <div id="game-hud" class="game-hud">
+          <div class="hud-hp">
+            <div class="hud-hp-bar-bg">
+              <div class="hud-hp-bar" id="hud-hp-bar"></div>
+            </div>
+            <div class="hud-hp-text" id="hud-hp-text">HP 100</div>
+          </div>
           <div class="hud-score" id="hud-score">0</div>
           <div class="hud-combo" id="hud-combo"></div>
           <div class="hud-judgment" id="hud-judgment"></div>
         </div>
         <div id="game-pause-overlay" class="game-pause-overlay">
           <h2>PAUSED</h2>
+          <div class="pause-tuning">
+            <div class="pause-tuning-row">
+              <label for="pause-note-speed">노트 속도</label>
+              <input type="range" id="pause-note-speed" min="200" max="1200" value="400">
+              <span id="pause-speed-value">400</span>
+            </div>
+            <div class="pause-tuning-row">
+              <label for="pause-audio-offset">싱크 보정</label>
+              <input type="range" id="pause-audio-offset" min="-200" max="200" value="0" step="10">
+              <span id="pause-offset-value">0ms</span>
+            </div>
+          </div>
           <button id="game-resume-btn" class="game-btn game-btn-primary">Resume</button>
           <button id="game-quit-btn" class="game-btn game-btn-secondary">Quit</button>
         </div>

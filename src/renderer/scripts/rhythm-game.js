@@ -18,8 +18,8 @@ class RhythmGame {
     this.laneKeys = ['s', 'd', 'f', ' ', 'j', 'k', 'l'];
     this.laneLabels = ['S', 'D', 'F', 'SP', 'J', 'K', 'L'];
     this.laneColors = [
-      '#FF6B6B', '#FFD93D', '#6BCB77', '#4D96FF',
-      '#6BCB77', '#FFD93D', '#FF6B6B'
+      '#FFFFFF', '#4D96FF', '#FFFFFF', '#FF9F43',
+      '#FFFFFF', '#4D96FF', '#FFFFFF'
     ];
 
     // Timing windows (seconds) - defaults to normal
@@ -47,6 +47,16 @@ class RhythmGame {
     this.combo = 0;
     this.maxCombo = 0;
     this.judgments = { perfect: 0, great: 0, good: 0, miss: 0 };
+    this.maxHp = 100;
+    this.hp = this.maxHp;
+    this.failed = false;
+    this.timingStats = {
+      fast: 0,
+      slow: 0,
+      totalHits: 0,
+      sumAbsMs: 0,
+      sumMs: 0
+    };
     this.keyStates = {};
     this.animationId = null;
     this.lastTimestamp = 0;
@@ -153,6 +163,11 @@ class RhythmGame {
       }
     }
 
+    // Resolve lane conflicts:
+    // If a short note appears inside an already-active long note on the same lane,
+    // drop the short note so hold patterns stay playable and readable.
+    this.notes = this._resolveLongNoteConflicts(this.notes);
+
     this.songDuration = midiData.header.duration || 0;
     if (this.notes.length > 0) {
       const lastNote = this.notes[this.notes.length - 1];
@@ -161,6 +176,85 @@ class RhythmGame {
 
     // Auto-analyze difficulty
     this.difficultyLevel = this._analyzeDifficulty(midiData);
+  }
+
+  _resolveLongNoteConflicts(notes) {
+    if (!notes || notes.length === 0) return [];
+
+    const byLane = Array.from({ length: 7 }, () => []);
+    for (const note of notes) {
+      byLane[note.lane].push(note);
+    }
+
+    const resolved = [];
+    const guard = 0.04; // avoid deleting notes right at the start/end edge
+
+    for (const laneNotes of byLane) {
+      laneNotes.sort((a, b) => {
+        if (a.time !== b.time) return a.time - b.time;
+        return b.duration - a.duration;
+      });
+
+      const kept = [];
+      for (const note of laneNotes) {
+        // Resolve long-vs-long overlap first by trimming the previous long note.
+        // This keeps patterns playable without deleting many notes.
+        if (note.isLong) {
+          for (let i = kept.length - 1; i >= 0; i--) {
+            const prev = kept[i];
+            if (!prev.isLong) continue;
+
+            const prevStart = prev.time;
+            const prevEnd = prev.time + prev.duration;
+            const curStart = note.time;
+
+            // If current long starts before previous long ended, trim previous.
+            if (curStart < prevEnd - guard && curStart > prevStart + guard) {
+              const trimmedDur = curStart - prevStart - guard;
+              if (trimmedDur >= this.longNoteThreshold) {
+                prev.duration = trimmedDur;
+              } else {
+                // If trimming makes it too short for a long note, convert to a short tap.
+                prev.isLong = false;
+                prev.duration = Math.max(0.08, Math.min(0.18, trimmedDur > 0 ? trimmedDur : 0.12));
+              }
+              break;
+            }
+          }
+        }
+
+        // Drop short notes that sit inside existing long-note windows.
+        const blockedByLong = kept.some(existing =>
+          existing.isLong &&
+          note.time > existing.time + guard &&
+          note.time < (existing.time + existing.duration) - guard &&
+          note.duration < Math.min(0.35, existing.duration * 0.6)
+        );
+        if (blockedByLong) continue;
+
+        // If a new long note fully covers a previously-kept short note region, remove that short note.
+        if (note.isLong) {
+          for (let i = kept.length - 1; i >= 0; i--) {
+            const prev = kept[i];
+            const prevStart = prev.time;
+            const prevEnd = prev.time + prev.duration;
+            const curStart = note.time;
+            const curEnd = note.time + note.duration;
+            const fullyInside = prevStart >= curStart + guard && prevEnd <= curEnd - guard;
+            if (!prev.isLong && fullyInside) {
+              kept.splice(i, 1);
+            }
+          }
+        }
+
+        kept.push(note);
+      }
+
+      resolved.push(...kept);
+    }
+
+    resolved.sort((a, b) => a.time - b.time);
+    return resolved;
   }
 
   // ─── Difficulty Analysis ──────────────────────────────
@@ -363,6 +457,15 @@ class RhythmGame {
     this.combo = 0;
     this.maxCombo = 0;
     this.judgments = { perfect: 0, great: 0, good: 0, miss: 0 };
+    this.hp = this.maxHp;
+    this.failed = false;
+    this.timingStats = {
+      fast: 0,
+      slow: 0,
+      totalHits: 0,
+      sumAbsMs: 0,
+      sumMs: 0
+    };
     this.judgmentEffects = [];
     this.hitEffects = [];
     this.comboBurstEffects = [];
@@ -449,6 +552,13 @@ class RhythmGame {
     else if (accuracy >= 70) grade = 'B';
     else if (accuracy >= 50) grade = 'C';
 
+    const avgAbsMs = this.timingStats.totalHits > 0
+      ? this.timingStats.sumAbsMs / this.timingStats.totalHits
+      : 0;
+    const avgMs = this.timingStats.totalHits > 0
+      ? this.timingStats.sumMs / this.timingStats.totalHits
+      : 0;
+
     return {
       score: this.score,
       maxCombo: this.maxCombo,
@@ -456,7 +566,15 @@ class RhythmGame {
       totalNotes: this.notes.length,
       accuracy: Math.round(accuracy * 10) / 10,
       grade,
-      difficultyLevel: this.difficultyLevel
+      difficultyLevel: this.difficultyLevel,
+      hp: Math.round(this.hp),
+      failed: this.failed || this.hp <= 0,
+      timing: {
+        fast: this.timingStats.fast,
+        slow: this.timingStats.slow,
+        avgAbsMs: Math.round(avgAbsMs),
+        avgMs: Math.round(avgMs)
+      }
     };
   }
 
@@ -496,7 +614,11 @@ class RhythmGame {
 
       const allProcessed = this.processedNotes.size >= this.notes.length;
       const pastEnd = this.currentTime > this.songDuration;
-      if (allProcessed || pastEnd) {
+      const hpDepleted = this.hp <= 0;
+      if (allProcessed || pastEnd || hpDepleted) {
+        if (hpDepleted) {
+          this.failed = true;
+        }
         this.gameState = 'ended';
         this._stopBackgroundAudio();
         this._removeInput();
@@ -515,7 +637,7 @@ class RhythmGame {
       const timePassed = this.currentTime - note.time;
       if (timePassed > this.missWindow) {
         this.processedNotes.add(note.id);
-        this._applyJudgment('miss', note.lane);
+        this._applyJudgment('miss', note.lane, null);
       }
     }
   }
@@ -532,9 +654,7 @@ class RhythmGame {
         // Released early — end long note, break combo
         delete this.longNoteHeld[note.id];
         this.processedNotes.add(note.id);
-        this.combo = 0;
-        this.comboAnimTime = now;
-        if (this.onScoreUpdate) this.onScoreUpdate(this.score, this.combo, 'miss');
+        this._applyJudgment('miss', note.lane, null);
         continue;
       }
 
@@ -551,7 +671,15 @@ class RhythmGame {
         this.hitEffects.push({ lane: note.lane, time: now });
         this.comboBurstEffects.push({ lane: note.lane, time: now });
         this.judgmentEffects.push({ judgment: 'perfect', lane: note.lane, time: now });
-        if (this.onScoreUpdate) this.onScoreUpdate(this.score, this.combo, 'perfect');
+        if (this.onScoreUpdate) {
+          this.onScoreUpdate(this.score, this.combo, 'perfect', {
+            timingLabel: 'HOLD',
+            timingMs: null,
+            hp: this.hp,
+            hpDelta: 0,
+            judgment: 'perfect'
+          });
+        }
         continue;
       }
 
@@ -572,7 +700,15 @@ class RhythmGame {
         if (ticks % 2 === 0) {
           this.hitEffects.push({ lane: note.lane, time: now });
         }
-        if (this.onScoreUpdate) this.onScoreUpdate(this.score, this.combo, 'perfect');
+        if (this.onScoreUpdate) {
+          this.onScoreUpdate(this.score, this.combo, 'perfect', {
+            timingLabel: 'HOLD',
+            timingMs: null,
+            hp: this.hp,
+            hpDelta: 0,
+            judgment: 'perfect'
+          });
+        }
       }
     }
   }
@@ -641,6 +777,7 @@ class RhythmGame {
     }
 
     if (!closestNote) return;
+    const signedDiffSec = this.currentTime - closestNote.time;
 
     let judgment;
     if (closestDiff <= this.perfectWindow) judgment = 'perfect';
@@ -656,7 +793,7 @@ class RhythmGame {
       this.processedNotes.add(closestNote.id);
     }
 
-    this._applyJudgment(judgment, lane);
+    this._applyJudgment(judgment, lane, signedDiffSec * 1000);
 
     if (this.gameMode === 'vocal') {
       this._gateVocal(closestNote);
@@ -667,8 +804,9 @@ class RhythmGame {
     this.hitEffects.push({ lane, time: performance.now() });
   }
 
-  _applyJudgment(judgment, lane) {
+  _applyJudgment(judgment, lane, timingMs = null) {
     const points = { perfect: 300, great: 200, good: 100, miss: 0 };
+    const hpDeltaByJudge = { perfect: 0.8, great: 0.4, good: -1.5, miss: -8.0 };
     const now = performance.now();
 
     if (judgment === 'miss') {
@@ -686,11 +824,36 @@ class RhythmGame {
     const comboMultiplier = 1 + Math.floor(this.combo / 10) * 0.1;
     this.score += Math.round(points[judgment] * comboMultiplier);
     this.judgments[judgment]++;
+    this.hp = Math.max(0, Math.min(this.maxHp, this.hp + (hpDeltaByJudge[judgment] || 0)));
+    if (this.hp <= 0) {
+      this.failed = true;
+    }
+
+    let timingLabel = null;
+    let roundedTiming = null;
+    if (typeof timingMs === 'number' && Number.isFinite(timingMs) && judgment !== 'miss') {
+      roundedTiming = Math.round(timingMs);
+      if (roundedTiming < -3) timingLabel = 'FAST';
+      else if (roundedTiming > 3) timingLabel = 'SLOW';
+      else timingLabel = 'CENTER';
+
+      this.timingStats.totalHits += 1;
+      this.timingStats.sumAbsMs += Math.abs(roundedTiming);
+      this.timingStats.sumMs += roundedTiming;
+      if (timingLabel === 'FAST') this.timingStats.fast += 1;
+      if (timingLabel === 'SLOW') this.timingStats.slow += 1;
+    }
 
     this.judgmentEffects.push({ judgment, lane, time: now });
 
     if (this.onScoreUpdate) {
-      this.onScoreUpdate(this.score, this.combo, judgment);
+      this.onScoreUpdate(this.score, this.combo, judgment, {
+        timingLabel,
+        timingMs: roundedTiming,
+        hp: this.hp,
+        hpDelta: hpDeltaByJudge[judgment] || 0,
+        judgment
+      });
     }
   }
 
@@ -777,7 +940,7 @@ class RhythmGame {
       const x = this._getLaneX(i);
       const pressed = this.keyStates[i];
       const color = this.laneColors[i];
-      const kw = this.laneWidth * 0.85;
+      const kw = i === 3 ? this.laneWidth * 1.15 : this.laneWidth * 0.85;
       const kh = 40;
       const ky = this.hitLineY + 5;
 
@@ -821,7 +984,7 @@ class RhythmGame {
       const y = this._getNoteY(note.time);
       const x = this._getLaneX(note.lane);
       const color = this.laneColors[note.lane];
-      const nw = this.noteWidth;
+      const nw = note.lane === 3 ? this.noteWidth * 1.2 : this.noteWidth;
       const nh = this.noteHeight;
 
       // ─── Long note body ───

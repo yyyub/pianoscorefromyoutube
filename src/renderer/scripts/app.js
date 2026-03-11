@@ -309,7 +309,11 @@ async function loadHistory() {
       const title = entry.title.length > 40 ? entry.title.slice(0, 40) + '...' : entry.title;
       return `<div class="history-item" data-url="${entry.url}" title="${entry.title}">
         <span class="history-title">${title}</span>
-        <span class="history-date">${dateStr}</span>
+        <div class="history-right">
+          <span class="history-date">${dateStr}</span>
+          <button class="history-action history-reconvert" data-url="${entry.url}" data-title="${entry.title}" type="button">재변환</button>
+          <button class="history-action history-delete" data-url="${entry.url}" data-title="${entry.title}" type="button">삭제</button>
+        </div>
       </div>`;
     }).join('');
 
@@ -321,6 +325,49 @@ async function loadHistory() {
         urlInput.value = item.dataset.url;
         clearUrlError();
         urlInput.focus();
+      });
+    });
+
+    listEl.querySelectorAll('.history-reconvert').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (isProcessing) return;
+        const url = btn.dataset.url;
+        if (!url) return;
+        addLog(`히스토리 재변환 시작: ${btn.dataset.title || url}`, 'info');
+        await startProcessing(url, {
+          useSeparation: document.getElementById('use-separation')?.checked ?? false,
+          qualityMode: document.getElementById('quality-mode')?.value ?? 'intermediate',
+          sourceType: document.getElementById('source-type')?.value ?? 'unknown',
+          targetPriority: document.getElementById('target-priority')?.value ?? 'balanced',
+          issueOffbeat: document.getElementById('issue-offbeat')?.checked ?? false,
+          issueWrongNotes: document.getElementById('issue-wrong-notes')?.checked ?? false
+        });
+      });
+    });
+
+    listEl.querySelectorAll('.history-delete').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (isProcessing) return;
+        const url = btn.dataset.url;
+        const title = btn.dataset.title || '이 항목';
+        if (!url) return;
+
+        const ok = window.confirm(`'${title}' 변환 기록과 생성 파일을 삭제할까요?`);
+        if (!ok) return;
+
+        try {
+          const result = await window.electronAPI.deleteHistoryEntry(url);
+          if (result && result.removed) {
+            addLog(`삭제 완료: ${title}`, 'success');
+            await loadHistory();
+          } else {
+            addLog(`삭제 실패: ${result?.message || '알 수 없는 오류'}`, 'error');
+          }
+        } catch (err) {
+          addLog(`삭제 실패: ${err.message}`, 'error');
+        }
       });
     });
   } catch (error) {

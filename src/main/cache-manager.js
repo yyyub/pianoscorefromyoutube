@@ -60,6 +60,23 @@ class CacheManager {
     };
   }
 
+  async removeByUrl(url) {
+    const urlHash = this.generateUrlHash(url);
+    const entry = this.cacheIndex[urlHash];
+    if (!entry) {
+      return null;
+    }
+
+    if (entry.audioPath && await fs.pathExists(entry.audioPath)) {
+      await fs.remove(entry.audioPath);
+    }
+
+    delete this.cacheIndex[urlHash];
+    await this.saveIndex();
+
+    return entry;
+  }
+
   async cacheAudio(url, audioPath, videoTitle) {
     const urlHash = this.generateUrlHash(url);
     const safeName = sanitize(videoTitle || urlHash, { replacement: '_' });

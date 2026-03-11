@@ -39,6 +39,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Get conversion history
   getHistory: () => ipcRenderer.invoke('get-history'),
 
+  // Delete one conversion history entry
+  deleteHistoryEntry: (url) => ipcRenderer.invoke('delete-history-entry', url),
+
   // Rhythm game APIs
   listMidiFiles: () => ipcRenderer.invoke('list-midi-files'),
   loadMidiForGame: (midiPath) => ipcRenderer.invoke('load-midi-for-game', midiPath),

@@ -26,20 +26,47 @@ class SheetGenerator {
 
       const timeSignature = `${timeSigEntry[0]}/${timeSigEntry[1]}`;
 
-      const notes = [];
+      const toNote = (note) => ({
+        midi: note.midi,
+        time: note.time,
+        duration: note.duration,
+        velocity: note.velocity
+      });
+
+      const rightNotes = [];
+      const leftNotes = [];
+      const otherNotes = [];
+
       midi.tracks.forEach(track => {
+        const trackName = (track.name || '').toLowerCase();
+        const channel = Number.isFinite(track.channel) ? track.channel : null;
+        const isRightTrack = trackName.includes('right') || channel === 0;
+        const isLeftTrack = trackName.includes('left') || channel === 1;
+
         track.notes.forEach(note => {
-          notes.push({
-            midi: note.midi,
-            time: note.time,
-            duration: note.duration,
-            velocity: note.velocity
-          });
+          const converted = toNote(note);
+          if (isRightTrack) {
+            rightNotes.push(converted);
+          } else if (isLeftTrack) {
+            leftNotes.push(converted);
+          } else {
+            otherNotes.push(converted);
+          }
         });
       });
 
+      // Fallback for generic MIDI: split remaining notes by register.
+      otherNotes.forEach(note => {
+        if (note.midi >= 60) {
+          rightNotes.push(note);
+        } else {
+          leftNotes.push(note);
+        }
+      });
+
       return {
-        notes,
+        rightNotes,
+        leftNotes,
         timeSignature,
         tempo,
         keySignature: 'C'
@@ -107,7 +134,7 @@ class SheetGenerator {
     return;
   }
 
-  buildMeasures(notes, tempo, timeSignature) {
+  buildMeasures(rightNotes, leftNotes, tempo, timeSignature) {
     const [numerator, denominator] = timeSignature.split('/').map(Number);
     const beatsPerMeasure = Number.isFinite(numerator) ? numerator : 4;
     const beatValue = Number.isFinite(denominator) ? denominator : 4;
@@ -142,13 +169,8 @@ class SheetGenerator {
       measureMap.get(key).notes.push(note.midi);
     };
 
-    notes.forEach(note => {
-      if (note.midi >= 60) {
-        addToMap(trebleMap, note);
-      } else {
-        addToMap(bassMap, note);
-      }
-    });
+    (rightNotes || []).forEach(note => addToMap(trebleMap, note));
+    (leftNotes || []).forEach(note => addToMap(bassMap, note));
 
     const maxMeasure = Math.max(
       trebleMap.size ? Math.max(...trebleMap.keys()) : 0,
@@ -234,7 +256,7 @@ class SheetGenerator {
     return tickables;
   }
 
-  async generatePianoStaff(notes, metadata) {
+  async generatePianoStaff(metadata) {
     const canvas = createCanvas(800, 1100);
     const rawContext = canvas.getContext('2d');
     const context2d = new Vex.CanvasContext(rawContext);
@@ -250,7 +272,7 @@ class SheetGenerator {
       measuresBass,
       beatsPerMeasure,
       beatValue
-    } = this.buildMeasures(notes, tempo, timeSignature);
+    } = this.buildMeasures(metadata.rightNotes, metadata.leftNotes, tempo, timeSignature);
 
     const totalMeasures = Math.max(measuresTreble.length, measuresBass.length);
     if (totalMeasures === 0) {
@@ -332,10 +354,10 @@ class SheetGenerator {
     return canvas;
   }
 
-  async createVexFlowScore(notes, metadata) {
+  async createVexFlowScore(metadata) {
     try {
       // Create the piano staff with VexFlow
-      const canvas = await this.generatePianoStaff(notes, metadata);
+      const canvas = await this.generatePianoStaff(metadata);
       return canvas;
     } catch (error) {
       throw new Error(`Failed to create score: ${error.message}`);
@@ -435,7 +457,7 @@ class SheetGenerator {
       }
 
       // Create VexFlow score
-      const score = await this.createVexFlowScore(midiData.notes, midiData);
+      const score = await this.createVexFlowScore(midiData);
 
       if (this.isCancelled) {
         throw new Error('Sheet generation cancelled');

@@ -362,6 +362,37 @@ class IPCHandlers {
         timestamp: entry.timestamp
       }));
     });
+
+    // Delete one history entry (cache + output folder)
+    ipcMain.handle('delete-history-entry', async (event, url) => {
+      if (!url) {
+        throw new Error('URL is required');
+      }
+
+      await fileManager.initialize();
+      await cacheManager.initialize();
+
+      const removedEntry = await cacheManager.removeByUrl(url);
+      if (!removedEntry) {
+        return { removed: false, message: '히스토리 항목을 찾지 못했습니다.' };
+      }
+
+      let removedOutput = false;
+      if (removedEntry.videoTitle) {
+        const folderName = fileManager.sanitizeFilename(removedEntry.videoTitle);
+        const outputSubDir = path.join(fileManager.getOutputDir(), folderName);
+        if (await fs.pathExists(outputSubDir)) {
+          await fs.remove(outputSubDir);
+          removedOutput = true;
+        }
+      }
+
+      return {
+        removed: true,
+        removedOutput,
+        title: removedEntry.videoTitle || ''
+      };
+    });
   }
 
   _parseMidiToJson(midi) {
