@@ -307,12 +307,13 @@ async function loadHistory() {
       const date = new Date(entry.timestamp);
       const dateStr = `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`;
       const title = entry.title.length > 40 ? entry.title.slice(0, 40) + '...' : entry.title;
-      return `<div class="history-item" data-url="${entry.url}" title="${entry.title}">
+      const canReconvert = Boolean(entry.url);
+      return `<div class="history-item" data-url="${entry.url || ''}" title="${entry.title}">
         <span class="history-title">${title}</span>
         <div class="history-right">
           <span class="history-date">${dateStr}</span>
-          <button class="history-action history-reconvert" data-url="${entry.url}" data-title="${entry.title}" type="button">재변환</button>
-          <button class="history-action history-delete" data-url="${entry.url}" data-title="${entry.title}" type="button">삭제</button>
+          <button class="history-action history-reconvert" data-url="${entry.url || ''}" data-title="${entry.title}" type="button" ${canReconvert ? '' : 'disabled'}>${canReconvert ? '재변환' : 'URL없음'}</button>
+          <button class="history-action history-delete" data-url="${entry.url || ''}" data-title="${entry.title}" type="button">삭제</button>
         </div>
       </div>`;
     }).join('');
@@ -321,6 +322,7 @@ async function loadHistory() {
     listEl.querySelectorAll('.history-item').forEach(item => {
       item.addEventListener('click', () => {
         if (isProcessing) return;
+        if (!item.dataset.url) return;
         const urlInput = document.getElementById('youtube-url');
         urlInput.value = item.dataset.url;
         clearUrlError();
@@ -358,7 +360,7 @@ async function loadHistory() {
         if (!ok) return;
 
         try {
-          const result = await window.electronAPI.deleteHistoryEntry(url);
+          const result = await window.electronAPI.deleteHistoryEntry({ url, title });
           if (result && result.removed) {
             addLog(`삭제 완료: ${title}`, 'success');
             await loadHistory();

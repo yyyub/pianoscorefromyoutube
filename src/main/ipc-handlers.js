@@ -350,36 +350,87 @@ class IPCHandlers {
       }
     });
 
-    // Get conversion history from cache
+    // Get conversion history (cache + output folder scan)
     ipcMain.handle('get-history', async () => {
       await cacheManager.initialize();
-      const entries = Object.values(cacheManager.cacheIndex)
-        .filter(entry => entry.url && entry.videoTitle)
+      await fileManager.initialize();
+
+      const byTitle = new Map();
+
+      // 1) Cache entries (have URL)
+      Object.values(cacheManager.cacheIndex)
+        .filter(entry => entry.videoTitle)
+        .forEach(entry => {
+          const title = entry.videoTitle;
+          const prev = byTitle.get(title);
+          const candidate = {
+            url: entry.url || null,
+            title,
+            timestamp: entry.timestamp || 0
+          };
+          if (!prev || (candidate.timestamp || 0) >= (prev.timestamp || 0)) {
+            byTitle.set(title, candidate);
+          }
+        });
+
+      // 2) Output folders/files (captures records not present in cache index)
+      const outputDir = fileManager.getOutputDir();
+      try {
+        const entries = await fs.readdir(outputDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.name === '.gitkeep') continue;
+
+          const fullPath = path.join(outputDir, entry.name);
+          let timestamp = 0;
+          try {
+            const stat = await fs.stat(fullPath);
+            timestamp = stat.mtimeMs || 0;
+          } catch (_) {}
+
+          if (!entry.isDirectory() && path.extname(entry.name).toLowerCase() !== '.mid') {
+            continue;
+          }
+
+          const title = entry.isDirectory() ? entry.name : path.basename(entry.name, path.extname(entry.name));
+          const prev = byTitle.get(title);
+          const candidate = {
+            url: prev ? prev.url : null,
+            title,
+            timestamp
+          };
+
+          if (!prev || (candidate.timestamp || 0) >= (prev.timestamp || 0)) {
+            byTitle.set(title, candidate);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to scan output directory for history:', err.message);
+      }
+
+      return Array.from(byTitle.values())
         .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-      return entries.map(entry => ({
-        url: entry.url,
-        title: entry.videoTitle,
-        timestamp: entry.timestamp
-      }));
     });
 
     // Delete one history entry (cache + output folder)
-    ipcMain.handle('delete-history-entry', async (event, url) => {
-      if (!url) {
-        throw new Error('URL is required');
+    ipcMain.handle('delete-history-entry', async (event, payload) => {
+      const url = typeof payload === 'string' ? payload : payload?.url;
+      const titleFromPayload = typeof payload === 'object' ? payload?.title : null;
+      if (!url && !titleFromPayload) {
+        throw new Error('URL or title is required');
       }
 
       await fileManager.initialize();
       await cacheManager.initialize();
 
-      const removedEntry = await cacheManager.removeByUrl(url);
-      if (!removedEntry) {
-        return { removed: false, message: '히스토리 항목을 찾지 못했습니다.' };
+      let removedEntry = null;
+      if (url) {
+        removedEntry = await cacheManager.removeByUrl(url);
       }
 
+      const title = (removedEntry && removedEntry.videoTitle) || titleFromPayload || '';
       let removedOutput = false;
-      if (removedEntry.videoTitle) {
-        const folderName = fileManager.sanitizeFilename(removedEntry.videoTitle);
+      if (title) {
+        const folderName = fileManager.sanitizeFilename(title);
         const outputSubDir = path.join(fileManager.getOutputDir(), folderName);
         if (await fs.pathExists(outputSubDir)) {
           await fs.remove(outputSubDir);
@@ -387,10 +438,11 @@ class IPCHandlers {
         }
       }
 
+      const removed = Boolean(removedEntry || removedOutput);
       return {
-        removed: true,
+        removed,
         removedOutput,
-        title: removedEntry.videoTitle || ''
+        title
       };
     });
   }
